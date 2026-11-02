@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use tokio_tungstenite::Connector;
 
-pub(crate) const BINANCE_TESTNET_REST_BASE_URL: &str = "https://testnet.binancefuture.com";
-pub(crate) const BINANCE_TESTNET_WS_BASE_URL: &str = "wss://stream.binancefuture.com";
+pub(crate) const BINANCE_TESTNET_REST_BASE_URL: &str = "https://demo-fapi.binance.com";
+pub(crate) const BINANCE_TESTNET_WS_BASE_URL: &str = "wss://demo-fstream.binance.com";
 pub(crate) const BINANCE_MAINNET_REST_BASE_URL: &str = "https://fapi.binance.com";
 pub(crate) const BINANCE_MAINNET_WS_BASE_URL: &str = "wss://fstream.binance.com";
 
@@ -422,7 +422,9 @@ impl BaseUrlKind {
 fn known_venue_from_url(raw: &str) -> Option<Venue> {
     let parsed = url::Url::parse(raw.trim()).ok()?;
     let host = parsed.host_str()?;
-    if host.eq_ignore_ascii_case("testnet.binancefuture.com")
+    if host.eq_ignore_ascii_case("demo-fapi.binance.com")
+        || host.eq_ignore_ascii_case("demo-fstream.binance.com")
+        || host.eq_ignore_ascii_case("testnet.binancefuture.com")
         || host.eq_ignore_ascii_case("stream.binancefuture.com")
     {
         Some(Venue::Testnet)
@@ -808,6 +810,83 @@ mod tests {
     #[test]
     fn testnet_ws_base_url_is_the_testnet_constant() {
         assert_eq!(Venue::Testnet.ws_base_url(), BINANCE_TESTNET_WS_BASE_URL);
+    }
+
+    #[test]
+    fn current_and_legacy_testnet_hosts_have_the_same_venue_identity() {
+        for endpoint in [
+            "https://demo-fapi.binance.com",
+            "wss://demo-fstream.binance.com",
+            "https://testnet.binancefuture.com",
+            "wss://stream.binancefuture.com",
+            "https://DEMO-FAPI.BINANCE.COM/custom/path",
+        ] {
+            assert_eq!(known_venue_from_url(endpoint), Some(Venue::Testnet));
+        }
+    }
+
+    #[test]
+    fn explicit_testnet_routes_current_and_legacy_urls_to_current_canonical_endpoints() {
+        for (kind, expected, endpoints) in [
+            (
+                BaseUrlKind::Rest,
+                "https://demo-fapi.binance.com",
+                [
+                    "https://demo-fapi.binance.com/custom/path",
+                    "https://testnet.binancefuture.com/legacy/path",
+                ],
+            ),
+            (
+                BaseUrlKind::WebSocket,
+                "wss://demo-fstream.binance.com",
+                [
+                    "wss://demo-fstream.binance.com/custom/path",
+                    "wss://stream.binancefuture.com/legacy/path",
+                ],
+            ),
+        ] {
+            assert_eq!(
+                resolve_base_url("testnet-route", Some(Venue::Testnet), None, kind),
+                Ok(expected.to_string())
+            );
+            for endpoint in endpoints {
+                assert_eq!(
+                    resolve_base_url("testnet-route", Some(Venue::Testnet), Some(endpoint), kind,),
+                    Ok(expected.to_string())
+                );
+                assert!(resolve_base_url(
+                    "mainnet-route",
+                    Some(Venue::Mainnet),
+                    Some(endpoint),
+                    kind,
+                )
+                .is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn testnet_route_rejects_mainnet_unknown_and_lookalike_hosts() {
+        for endpoint in [
+            "https://fapi.binance.com",
+            "wss://fstream.binance.com",
+            "https://proxy.example.test",
+            "https://demo-fapi.binance.com.example.test",
+            "wss://demo-fstream.binance.com.example.test",
+            "https://demo-fapi.binance.com@proxy.example.test",
+            "not a URL",
+        ] {
+            assert_ne!(known_venue_from_url(endpoint), Some(Venue::Testnet));
+            for kind in [BaseUrlKind::Rest, BaseUrlKind::WebSocket] {
+                assert!(resolve_base_url(
+                    "testnet-route",
+                    Some(Venue::Testnet),
+                    Some(endpoint),
+                    kind,
+                )
+                .is_err());
+            }
+        }
     }
 
     #[test]
