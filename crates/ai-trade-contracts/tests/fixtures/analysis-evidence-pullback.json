@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "evidence_id": "ae_90e80fd47047ea726acebcca9c407bac",
+  "evidence_hash": "90e80fd47047ea726acebcca9c407bac09471096e8a7d2e64b2a7f824678bbd2",
+  "market_context_id": "mac_d12dfb39b48e1127ad66b9f7bad15888",
+  "market_context_hash": "d12dfb39b48e1127ad66b9f7bad158887fddc7a25f045d0bc75959ea3898c37f",
+  "created_at_ms": 1700000043000,
+  "analysis_agent_id": "analysis.market.v1",
+  "model_id": "fixture-model-v1",
+  "prompt_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "market_bias": {
+    "status": "available",
+    "value": "bullish"
+  },
+  "trend_assessment": {
+    "status": "available",
+    "value": "Higher timeframes trend upward."
+  },
+  "volatility_assessment": {
+    "status": "available",
+    "value": "Volatility is normal."
+  },
+  "derivatives_assessment": {
+    "status": "unavailable",
+    "value": null
+  },
+  "liquidity_assessment": {
+    "status": "available",
+    "value": "Liquidity is healthy."
+  },
+  "multi_timeframe_interpretation": {
+    "status": "available",
+    "value": "Entry timeframe is pulling back within an upward structure."
+  },
+  "risks": {
+    "status": "available",
+    "items": ["Derivatives confirmation is unavailable."]
+  },
+  "conflicting_signals": {
+    "status": "available",
+    "items": ["Entry timeframe opposes the higher-timeframe trend."]
+  },
+  "confidence": {
+    "status": "available",
+    "value": 0.72
+  },
+  "opportunity_type": {
+    "status": "available",
+    "value": "pullback"
+  },
+  "evidence_refs": [
+    {
+      "context_id": "mac_d12dfb39b48e1127ad66b9f7bad15888",
+      "fact_path": "regime.multi_timeframe_relationship"
+    },
+    {
+      "context_id": "mac_d12dfb39b48e1127ad66b9f7bad15888",
+      "fact_path": "regime.trend.direction"
+    }
+  ],
+  "ui_summary": "Uptrend pullback with missing derivatives confirmation.",
+  "status": "valid",
+  "abstain_reason": null
+}

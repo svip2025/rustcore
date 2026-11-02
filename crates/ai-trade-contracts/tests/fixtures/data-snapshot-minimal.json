@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "snap_2f8967e542b2baf1062f42b9b3497155",
+  "created_at_ms": 1786291200000,
+  "bot_uid": "bot_01J00000000000000000000000",
+  "symbol_key": "binance|futures|BTC|USDT|USDT",
+  "sources": [
+    {
+      "capability": "ohlcv",
+      "provider": "binance_futures_rest",
+      "as_of_ms": 1786291195000,
+      "degraded": false
+    }
+  ],
+  "market": {
+    "last_price": "63241.50",
+    "timeframe_main": "15m",
+    "candles": {
+      "15m": [
+        {
+          "open_time_ms": 1786290300000,
+          "o": "63100.00",
+          "h": "63300.00",
+          "l": "63000.00",
+          "c": "63241.50",
+          "v": "12.5",
+          "closed": true
+        }
+      ]
+    },
+    "indicators": {
+      "15m": {
+        "ema_short": 63180.2,
+        "ema_long": 62950.1,
+        "rsi_14": 57.3,
+        "macd": 12.4,
+        "macd_signal": 9.8,
+        "macd_hist": 2.6,
+        "bb_upper": 63800.0,
+        "bb_middle": 63100.0,
+        "bb_lower": 62400.0,
+        "atr_14": 380.5,
+        "vol_ratio": 1.24
+      }
+    }
+  },
+  "account": {
+    "equity_usdt": "10000.00",
+    "available_usdt": "10000.00",
+    "used_margin_usdt": "0.00",
+    "today_realized_pnl_usdt": "0.00",
+    "open_positions_count": 0,
+    "positions": []
+  },
+  "quality": {
+    "gate": "pass",
+    "checks": [
+      {
+        "name": "required_present",
+        "ok": true,
+        "detail": "required inputs present"
+      }
+    ],
+    "allow_open": true,
+    "allow_close": true
+  }
+}

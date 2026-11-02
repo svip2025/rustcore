@@ -1,0 +1,29 @@
+name: rustcore-tests
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_ROOT_HOST: "%"
+      MYSQL_DATABASE: mysql
+    ports:
+      - "127.0.0.1:13306:3306"
+    # Disposable scratch databases: never point this service at application data.
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "--host=127.0.0.1", "--user=root", "--silent"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  # Makes plain `docker compose up -d` wait for the fixture to accept connections.
+  ready:
+    image: mysql:8.4
+    depends_on:
+      mysql:
+        condition: service_healthy
+    entrypoint: ["mysqladmin"]
+    command: ["ping", "--host=mysql", "--user=root", "--silent"]

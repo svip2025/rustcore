@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "context_id": "mac_d12dfb39b48e1127ad66b9f7bad15888",
+  "context_hash": "d12dfb39b48e1127ad66b9f7bad158887fddc7a25f045d0bc75959ea3898c37f",
+  "created_at_ms": 1700000041000,
+  "cycle_id": "cyc_regime_fixture_002",
+  "snapshot_identity": {
+    "snapshot_id": "snap_11111111111111111111111111111111",
+    "created_at_ms": 1700000000000,
+    "symbol_key": "binance:futures:BTCUSDT"
+  },
+  "horizon": "swing",
+  "strategy_context": "TREND",
+  "regime": {
+    "schema_version": 1,
+    "snapshot_id": "snap_11111111111111111111111111111111",
+    "cycle_id": "cyc_regime_fixture_002",
+    "snapshot_as_of_ms": 1700000000000,
+    "classified_at_ms": 1700000010000,
+    "symbol_key": "binance:futures:BTCUSDT",
+    "market": "binance-usdt-m-futures",
+    "horizon": "swing",
+    "timeframes": {
+      "entry": "15m",
+      "primary": "1h",
+      "context": "4h",
+      "background": "1d"
+    },
+    "algorithm_version": "regime-classifier-ts/v1",
+    "ruleset_version": "regime-rules/v1",
+    "parameters_version": "regime-parameters/v1",
+    "algorithm_config_hash": "c57b411d37596f83bd1f98e0372c51dc69d5a6679ea6a89a77ab72e518400e64",
+    "data_quality": {
+      "status": "available",
+      "snapshot_quality": {
+        "gate": "pass",
+        "checks": [
+          {
+            "name": "closed_candles",
+            "ok": true,
+            "detail": "complete"
+          }
+        ],
+        "allow_open": true,
+        "allow_close": true
+      },
+      "snapshot_age_ms": 10000,
+      "max_snapshot_age_ms": 60000,
+      "facts_complete": true,
+      "missing_required_facts": null
+    },
+    "trend": {
+      "direction": "up",
+      "strength": "0.72",
+      "confidence": "0.9"
+    },
+    "volatility": {
+      "state": "normal",
+      "realized_pct": "0.02"
+    },
+    "liquidity": {
+      "state": "healthy",
+      "spread_bps": "4",
+      "depth_ratio": "1.4"
+    },
+    "uncertainty": {
+      "state": "low",
+      "confidence": "0.9"
+    },
+    "multi_timeframe_relationship": "pullback",
+    "regime_id": "reg_95490831a4df79c99a4facf8698531df",
+    "regime_hash": "95490831a4df79c99a4facf8698531df5dc1b322376bf96f7d1041dd095f948e"
+  },
+  "strategy_route": {
+    "schema_version": 1,
+    "created_at_ms": 1700000040000,
+    "router_version": "strategy-router-ts/v1",
+    "router_config_hash": "3fb132fd07115b0effc1eb1de2df2d18314a86ff61a86403d1b8a05fa6e352a3",
+    "effective_policy_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "horizon": "swing",
+    "regime_ref": {
+      "regime_id": "reg_95490831a4df79c99a4facf8698531df",
+      "regime_hash": "95490831a4df79c99a4facf8698531df5dc1b322376bf96f7d1041dd095f948e",
+      "snapshot_id": "snap_11111111111111111111111111111111",
+      "cycle_id": "cyc_regime_fixture_002",
+      "algorithm_version": "regime-classifier-ts/v1",
+      "algorithm_config_hash": "c57b411d37596f83bd1f98e0372c51dc69d5a6679ea6a89a77ab72e518400e64"
+    },
+    "route": "TREND",
+    "reasons": [
+      {
+        "code": "REGIME_TREND",
+        "source": "trend",
+        "threshold": "0.6"
+      }
+    ],
+    "fast_path": false,
+    "route_state": {
+      "current_route": "TREND",
+      "dwell_observations": 6,
+      "last_switch_at_ms": 1700000000000,
+      "pending_candidate": null
+    },
+    "route_id": "route_da23e7daa1a30489ad52bb06f62d9782",
+    "route_hash": "da23e7daa1a30489ad52bb06f62d97829631d863f6bb91716276f97b111269cf"
+  },
+  "public_facts": [
+    {
+      "fact_path": "market.indicators.1h.ema_short",
+      "value": 63180.2,
+      "status": "available",
+      "source_ref": "snapshot.sources[0]",
+      "observed_at_ms": 1700000000000
+    },
+    {
+      "fact_path": "market.derivatives.open_interest",
+      "value": null,
+      "status": "unavailable",
+      "source_ref": null,
+      "observed_at_ms": null
+    }
+  ],
+  "data_quality": {
+    "status": "available",
+    "snapshot_quality": {
+      "gate": "pass",
+      "checks": [
+        {
+          "name": "closed_candles",
+          "ok": true,
+          "detail": "complete"
+        }
+      ],
+      "allow_open": true,
+      "allow_close": true
+    },
+    "snapshot_age_ms": 10000,
+    "max_snapshot_age_ms": 60000,
+    "facts_complete": true,
+    "missing_required_facts": null
+  }
+}

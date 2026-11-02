@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "context_id": "mdc_0f5418ad24392f504f342b33d46fde3c",
+  "context_hash": "0f5418ad24392f504f342b33d46fde3ce9a041bb5b5d2aba092daa962ad9b88b",
+  "created_at_ms": 1700000042000,
+  "as_of_ms": 1700000040000,
+  "cycle_id": "cyc_regime_fixture_002",
+  "member_id": "member_fixture_001",
+  "trading_account_id": "account_fixture_001",
+  "market_context_id": "mac_d12dfb39b48e1127ad66b9f7bad15888",
+  "market_context_hash": "d12dfb39b48e1127ad66b9f7bad158887fddc7a25f045d0bc75959ea3898c37f",
+  "position": {
+    "status": "available",
+    "value": {
+      "position_id": "position_fixture_001",
+      "symbol_key": "binance:futures:BTCUSDT",
+      "side": "long"
+    },
+    "observed_at_ms": 1700000040000
+  },
+  "unrealized_pnl": {
+    "status": "available",
+    "value": "12.50",
+    "observed_at_ms": 1700000040000
+  },
+  "exposure": {
+    "status": "available",
+    "value": "0.12",
+    "observed_at_ms": 1700000040000
+  },
+  "drawdown": {
+    "status": "available",
+    "value": "0.03",
+    "observed_at_ms": 1700000040000
+  },
+  "recent_trades": {
+    "status": "unavailable",
+    "summary": null
+  },
+  "runtime_eligibility": {
+    "status": "available",
+    "value": {
+      "can_open": true,
+      "can_close": true,
+      "reason_codes": []
+    },
+    "observed_at_ms": 1700000040000
+  }
+}

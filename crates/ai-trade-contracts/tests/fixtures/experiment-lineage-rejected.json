@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "lineage_id": "lin_4c2f5b8038122c156fbf1043f56626d1",
+  "lineage_hash": "4c2f5b8038122c156fbf1043f56626d19088b4f0b1cde6e7a4b3ab0634ced199",
+  "experiment_id": "exp_candidate_002_attempt_03",
+  "family_id": "fam_breakout_router_v2",
+  "candidate_id": "candidate_002",
+  "candidate_parent_status": "available",
+  "candidate_parent_id": "candidate_001",
+  "hypothesis": "A stricter transition filter reduces false breakout entries.",
+  "change_summary": "Require two confirmed transition observations before routing.",
+  "dataset_assignment_id": "dsa_eval_20260814_01",
+  "datasets_used": [
+    {
+      "dataset_id": "ds_6b57decf36b7777b7e7fd26781300488",
+      "dataset_hash": "6b57decf36b7777b7e7fd267813004882325262df353a9eea68acc97cffffd0c"
+    }
+  ],
+  "evaluation_result_status": "available",
+  "evaluation_result": {
+    "summary": "Transition precision improved, but extreme-volatility drawdown regressed.",
+    "result_manifest_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "rejected_reason_status": "available",
+  "rejected_reason": "Extreme-volatility drawdown exceeded the evaluator limit.",
+  "attempt_count": 3,
+  "family_lineage_count": 5,
+  "lineage_status": "rejected",
+  "created_at_ms": 1786636801000,
+  "updated_at_ms": 1786636802000
+}

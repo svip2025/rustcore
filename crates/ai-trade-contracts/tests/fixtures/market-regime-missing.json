@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "snap_11111111111111111111111111111111",
+  "cycle_id": "cyc_regime_fixture_003",
+  "snapshot_as_of_ms": 1700000000000,
+  "classified_at_ms": 1700000010000,
+  "symbol_key": "binance:futures:BTCUSDT",
+  "market": "binance-usdt-m-futures",
+  "horizon": "swing",
+  "timeframes": {
+    "entry": "15m",
+    "primary": "1h",
+    "context": "4h",
+    "background": "1d"
+  },
+  "algorithm_version": "regime-classifier-ts/v1",
+  "ruleset_version": "regime-rules/v1",
+  "parameters_version": "regime-parameters/v1",
+  "algorithm_config_hash": "c57b411d37596f83bd1f98e0372c51dc69d5a6679ea6a89a77ab72e518400e64",
+  "data_quality": {
+    "status": "available",
+    "snapshot_quality": {
+      "gate": "pass",
+      "checks": [
+        {
+          "name": "closed_candles",
+          "ok": true,
+          "detail": "complete"
+        }
+      ],
+      "allow_open": true,
+      "allow_close": true
+    },
+    "snapshot_age_ms": 10000,
+    "max_snapshot_age_ms": 60000,
+    "facts_complete": false,
+    "missing_required_facts": [
+      "trend_score"
+    ]
+  },
+  "trend": {
+    "direction": null,
+    "strength": null,
+    "confidence": null
+  },
+  "volatility": {
+    "state": null,
+    "realized_pct": null
+  },
+  "liquidity": {
+    "state": null,
+    "spread_bps": null,
+    "depth_ratio": null
+  },
+  "uncertainty": {
+    "state": null,
+    "confidence": null
+  },
+  "multi_timeframe_relationship": null,
+  "regime_id": "reg_6a2423b06c5f2b9c2597b454c10900b0",
+  "regime_hash": "6a2423b06c5f2b9c2597b454c10900b0230ee5705e7d01b2157ebda8909e6413"
+}

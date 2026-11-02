@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "risk_verdict_id": "rv_01J00000000000000000000000",
+  "intent_id": "int_01J00000000000000000000000",
+  "created_at_ms": 1786291210000,
+  "policy_version": "risk_policy_v3",
+  "policy_hash": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+  "decision": "reject",
+  "reject_reason_code": "DATA_QUALITY_FAIL",
+  "rules": [
+    {
+      "rule": "data_quality_gate",
+      "result": "reject"
+    }
+  ],
+  "budget_as_of_ms": 1786291202000,
+  "evaluator_version": "risk-policy@1.0.0"
+}

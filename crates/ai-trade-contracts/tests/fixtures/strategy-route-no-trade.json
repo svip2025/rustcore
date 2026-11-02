@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "created_at_ms": 1700000040000,
+  "router_version": "strategy-router-ts/v1",
+  "router_config_hash": "3fb132fd07115b0effc1eb1de2df2d18314a86ff61a86403d1b8a05fa6e352a3",
+  "effective_policy_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+  "horizon": "swing",
+  "regime_ref": {
+    "regime_id": "reg_4c06a9d4343aee50c6c3721e50d171e7",
+    "regime_hash": "4c06a9d4343aee50c6c3721e50d171e78a325a7f48c57b7db9fb8453108c7073",
+    "snapshot_id": "snap_11111111111111111111111111111111",
+    "cycle_id": "cyc_regime_fixture_004",
+    "algorithm_version": "regime-classifier-ts/v1",
+    "algorithm_config_hash": "c57b411d37596f83bd1f98e0372c51dc69d5a6679ea6a89a77ab72e518400e64"
+  },
+  "route": "NO_TRADE",
+  "reasons": [
+    {
+      "code": "LIQUIDITY_UNSAFE",
+      "source": "liquidity",
+      "threshold": null
+    }
+  ],
+  "fast_path": true,
+  "route_state": {
+    "current_route": "NO_TRADE",
+    "dwell_observations": 1,
+    "last_switch_at_ms": 1700000040000,
+    "pending_candidate": null
+  },
+  "route_id": "route_4f2155873fef37ce8408717b714c1a2f",
+  "route_hash": "4f2155873fef37ce8408717b714c1a2f58d8c43cf8f9f37d9aae68c1a9c58dbe"
+}

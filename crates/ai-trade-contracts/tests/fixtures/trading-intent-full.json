@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "intent_id": "int_01J00000000000000000000001",
+  "bot_uid": "bot_01J00000000000000000000001",
+  "run_id": "run_01J00000000000000000000001",
+  "cycle_id": "cyc_01J00000000000000000000001",
+  "snapshot_id": "snap_878087f21aa2077ef0524991c60ac455",
+  "evidence_ids": [
+    "ev_01J00000000000000000000000",
+    "ev_01J00000000000000000000001"
+  ],
+  "decision_agent_id": "decision.ensemble.v1",
+  "model_ids": ["deepseek-reasoner", "gpt-5.2"],
+  "prompt_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  "config_hash": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  "policy_version": "risk_policy_v3",
+  "action": "open_long",
+  "symbol_key": "binance|futures|BTC|USDT|USDT",
+  "entry": {
+    "order_type": "limit",
+    "limit_price": "63200.00",
+    "max_slippage_bps": 15
+  },
+  "protection": {
+    "stop_loss_price": "61000.00",
+    "take_profit_price": "67000.00",
+    "required": true
+  },
+  "conviction": 0.68,
+  "valid_until_ms": 1786292100000,
+  "reasoning": "multi-timeframe evidence supports a bounded long intent",
+  "reasoning_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+}

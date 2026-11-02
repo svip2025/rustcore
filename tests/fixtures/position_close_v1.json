@@ -1,0 +1,381 @@
+{
+  "caseSources": {
+    "pendingUnknownReceipt": {
+      "newBootId": "01M3SS5WYAEJRTJNXEXTXMY3R0",
+      "oldBootId": "01M3SS5KH8MNG18XDY72BTY132",
+      "source": "real child process opens the same persisted database through Store::connect; new process boot and authenticated gRPC service; pure GetPositionCloseReceipt; no fabricated response or expected_boot rewrite"
+    },
+    "preparedReceipt": "production typed Entry; production prepare helper pins committed T1 without dispatch; authenticated GetPositionCloseReceipt",
+    "reopenedCurrentReceipt": "production accepted close; controlled same-ID current-row reopen; authenticated GetPositionCloseReceipt; not a new-entry/reconcile wiring proof"
+  },
+  "cases": {
+    "closedTarget": {
+      "available": false,
+      "engine_boot_id": "01M3SS5KH8MNG18XDY72BTY132",
+      "observed_at_ms": 1790792885877,
+      "reason_code": "POSITION_NOT_CLOSABLE",
+      "schema_version": 1,
+      "target": null
+    },
+    "foreignActorReceipt": {
+      "engine_order_id": null,
+      "execution_outcome": {
+        "observed_at_ms": null,
+        "position_id": "",
+        "quantity": null,
+        "revision": "0",
+        "schema_version": 1,
+        "source": "",
+        "state": null,
+        "status": "unknown"
+      },
+      "found": false,
+      "position_id": "",
+      "position_observation": {
+        "observed_at_ms": null,
+        "position_id": "",
+        "quantity": null,
+        "revision": "0",
+        "schema_version": 1,
+        "source": "",
+        "state": null,
+        "status": "unknown"
+      },
+      "protection_observation": {
+        "reason_code": "PROTECTION_CLEANUP_NOT_PROVEN",
+        "schema_version": 1,
+        "status": "unknown"
+      },
+      "reason_code": "REQUEST_NOT_FOUND",
+      "request_ref": "",
+      "request_status": "rejected",
+      "risk_verdict_id": null,
+      "schema_version": 1,
+      "target_revision": "0"
+    },
+    "pendingUnknownReceipt": {
+      "engine_order_id": null,
+      "execution_outcome": {
+        "observed_at_ms": null,
+        "position_id": "",
+        "quantity": null,
+        "revision": "0",
+        "schema_version": 1,
+        "source": "",
+        "state": null,
+        "status": "unknown"
+      },
+      "found": true,
+      "position_id": "pos_01M3SS5WNSNC3MQFTTR4Z9N8E4",
+      "position_observation": {
+        "observed_at_ms": 1790792892248,
+        "position_id": "pos_01M3SS5WNSNC3MQFTTR4Z9N8E4",
+        "quantity": "10",
+        "revision": "2",
+        "schema_version": 1,
+        "source": "position_store",
+        "state": "protected",
+        "status": "observed"
+      },
+      "protection_observation": {
+        "reason_code": "PROTECTION_CLEANUP_NOT_PROVEN",
+        "schema_version": 1,
+        "status": "unknown"
+      },
+      "reason_code": "PREPARED_PREVIOUS_BOOT",
+      "request_ref": "01M3SS5WX1B1F8ARGXPPS2DN8B",
+      "request_status": "pending_unknown",
+      "risk_verdict_id": null,
+      "schema_version": 1,
+      "target_revision": "2"
+    },
+    "preparedReceipt": {
+      "engine_order_id": null,
+      "execution_outcome": {
+        "observed_at_ms": null,
+        "position_id": "",
+        "quantity": null,
+        "revision": "0",
+        "schema_version": 1,
+        "source": "",
+        "state": null,
+        "status": "unknown"
+      },
+      "found": true,
+      "position_id": "pos_01M3SS5WNSNC3MQFTTR4Z9N8E4",
+      "position_observation": {
+        "observed_at_ms": 1790792889277,
+        "position_id": "pos_01M3SS5WNSNC3MQFTTR4Z9N8E4",
+        "quantity": "10",
+        "revision": "2",
+        "schema_version": 1,
+        "source": "position_store",
+        "state": "protected",
+        "status": "observed"
+      },
+      "protection_observation": {
+        "reason_code": "PROTECTION_CLEANUP_NOT_PROVEN",
+        "schema_version": 1,
+        "status": "unknown"
+      },
+      "reason_code": "PREPARED",
+      "request_ref": "01M3SS5WX1B1F8ARGXPPS2DN8B",
+      "request_status": "prepared",
+      "risk_verdict_id": null,
+      "schema_version": 1,
+      "target_revision": "2"
+    },
+    "preparedRequest": {
+      "actor_member_id": "9",
+      "credential_id": "paper",
+      "expected_boot_id": "01M3SS5KH8MNG18XDY72BTY132",
+      "expected_revision": "2",
+      "position_id": "pos_01M3SS5WNSNC3MQFTTR4Z9N8E4",
+      "request_ref": "01M3SS5WX1B1F8ARGXPPS2DN8B",
+      "schema_version": 1
+    },
+    "preparedTarget": {
+      "available": true,
+      "engine_boot_id": "01M3SS5KH8MNG18XDY72BTY132",
+      "observed_at_ms": 1790792889244,
+      "reason_code": "AVAILABLE",
+      "schema_version": 1,
+      "target": {
+        "bot_uid": "bot_vector_pending",
+        "direction": "long",
+        "entry_engine_order_id": "01M3SS5WNJTJH7T0NRJN0RC4VD",
+        "entry_epoch": "1",
+        "execution_venue": "simulation",
+        "exit_epoch": "0",
+        "position_id": "pos_01M3SS5WNSNC3MQFTTR4Z9N8E4",
+        "quantity": "10",
+        "revision": "2",
+        "run_mode": "paper",
+        "schema_version": 1,
+        "symbol_key": "binance|futures|BTC|USDT|USDT"
+      }
+    },
+    "reopenedCurrentReceipt": {
+      "engine_order_id": "01M3SS5SF6G8J5YWH414SYGS6J",
+      "execution_outcome": {
+        "observed_at_ms": 1790792885749,
+        "position_id": "pos_01M3SS5RDDWYBDYNWM5TB030ZF",
+        "quantity": "0",
+        "revision": "4",
+        "schema_version": 1,
+        "source": "paper_transaction",
+        "state": "closed",
+        "status": "observed"
+      },
+      "found": true,
+      "position_id": "pos_01M3SS5RDDWYBDYNWM5TB030ZF",
+      "position_observation": {
+        "observed_at_ms": 1790792885928,
+        "position_id": "pos_01M3SS5RDDWYBDYNWM5TB030ZF",
+        "quantity": "7",
+        "revision": "5",
+        "schema_version": 1,
+        "source": "position_store",
+        "state": "open",
+        "status": "observed"
+      },
+      "protection_observation": {
+        "reason_code": "PROTECTION_CLEANUP_NOT_PROVEN",
+        "schema_version": 1,
+        "status": "unknown"
+      },
+      "reason_code": "PAPER_FILLED",
+      "request_ref": "01M3SS5SDHX6XSSSDMQ7XHPWSJ",
+      "request_status": "accepted",
+      "risk_verdict_id": "rv_5b19fcc9c98888356d3c5eea74",
+      "schema_version": 1,
+      "target_revision": "2"
+    },
+    "requestIdentityConflict": {
+      "engine_order_id": null,
+      "execution_outcome": {
+        "observed_at_ms": null,
+        "position_id": "",
+        "quantity": null,
+        "revision": "0",
+        "schema_version": 1,
+        "source": "",
+        "state": null,
+        "status": "unknown"
+      },
+      "found": false,
+      "position_id": "",
+      "position_observation": {
+        "observed_at_ms": null,
+        "position_id": "",
+        "quantity": null,
+        "revision": "0",
+        "schema_version": 1,
+        "source": "",
+        "state": null,
+        "status": "unknown"
+      },
+      "protection_observation": {
+        "reason_code": "PROTECTION_CLEANUP_NOT_PROVEN",
+        "schema_version": 1,
+        "status": "unknown"
+      },
+      "reason_code": "REQUEST_IDENTITY_CONFLICT",
+      "request_ref": "",
+      "request_status": "rejected",
+      "risk_verdict_id": null,
+      "schema_version": 1,
+      "target_revision": "0"
+    }
+  },
+  "receipt": {
+    "engine_order_id": "01M3SS5SF6G8J5YWH414SYGS6J",
+    "execution_outcome": {
+      "observed_at_ms": 1790792885749,
+      "position_id": "pos_01M3SS5RDDWYBDYNWM5TB030ZF",
+      "quantity": "0",
+      "revision": "4",
+      "schema_version": 1,
+      "source": "paper_transaction",
+      "state": "closed",
+      "status": "observed"
+    },
+    "found": true,
+    "position_id": "pos_01M3SS5RDDWYBDYNWM5TB030ZF",
+    "position_observation": {
+      "observed_at_ms": 1790792885791,
+      "position_id": "pos_01M3SS5RDDWYBDYNWM5TB030ZF",
+      "quantity": "0",
+      "revision": "4",
+      "schema_version": 1,
+      "source": "position_store",
+      "state": "closed",
+      "status": "observed"
+    },
+    "protection_observation": {
+      "reason_code": "PROTECTION_CLEANUP_NOT_PROVEN",
+      "schema_version": 1,
+      "status": "unknown"
+    },
+    "reason_code": "PAPER_FILLED",
+    "request_ref": "01M3SS5SDHX6XSSSDMQ7XHPWSJ",
+    "request_status": "accepted",
+    "risk_verdict_id": "rv_5b19fcc9c98888356d3c5eea74",
+    "schema_version": 1,
+    "target_revision": "2"
+  },
+  "replay": {
+    "engine_order_id": "01M3SS5SF6G8J5YWH414SYGS6J",
+    "execution_outcome": {
+      "observed_at_ms": 1790792885749,
+      "position_id": "pos_01M3SS5RDDWYBDYNWM5TB030ZF",
+      "quantity": "0",
+      "revision": "4",
+      "schema_version": 1,
+      "source": "paper_transaction",
+      "state": "closed",
+      "status": "observed"
+    },
+    "found": true,
+    "position_id": "pos_01M3SS5RDDWYBDYNWM5TB030ZF",
+    "position_observation": {
+      "observed_at_ms": 1790792885799,
+      "position_id": "pos_01M3SS5RDDWYBDYNWM5TB030ZF",
+      "quantity": "0",
+      "revision": "4",
+      "schema_version": 1,
+      "source": "position_store",
+      "state": "closed",
+      "status": "observed"
+    },
+    "protection_observation": {
+      "reason_code": "PROTECTION_CLEANUP_NOT_PROVEN",
+      "schema_version": 1,
+      "status": "unknown"
+    },
+    "reason_code": "PAPER_FILLED",
+    "request_ref": "01M3SS5SDHX6XSSSDMQ7XHPWSJ",
+    "request_status": "accepted",
+    "risk_verdict_id": "rv_5b19fcc9c98888356d3c5eea74",
+    "schema_version": 1,
+    "target_revision": "2"
+  },
+  "request": {
+    "actor_member_id": "9",
+    "credential_id": "paper",
+    "expected_boot_id": "01M3SS5KH8MNG18XDY72BTY132",
+    "expected_revision": "2",
+    "position_id": "pos_01M3SS5RDDWYBDYNWM5TB030ZF",
+    "request_ref": "01M3SS5SDHX6XSSSDMQ7XHPWSJ",
+    "schema_version": 1
+  },
+  "schema": "b3-position-close-kernel-vectors.1",
+  "source": "authenticated production gRPC: FundSimulationAccount/PutRiskBudget/ExecuteIntents/GetPositionCloseTarget/ClosePosition/GetPositionCloseReceipt",
+  "sources": [
+    {
+      "file": "proto/execution_engine_v2.proto",
+      "sha256": "6ee77ba0c2e8c2e8fbdd2a1791df3de67b4e40b0ddeae0f2b424c1bdf8419f93"
+    },
+    {
+      "file": "services/rustcore/src/position_close.rs",
+      "sha256": "2a8e95144756fba1841e3bc954a50de9b597c675c34c47bc0238a92c78a63d85"
+    },
+    {
+      "file": "services/rustcore/src/position_close_tests.rs",
+      "sha256": "691423998d7719e226c99f61511066ccbc9b7451a4948c960af7ccf5457435be"
+    },
+    {
+      "file": "services/rustcore/src/svc.rs",
+      "sha256": "858d76e827f4970a8e64fdf3f6a897b36b381d8fee0d9aab3ad7227f88853026"
+    },
+    {
+      "file": "services/rustcore/src/svc_v2.rs",
+      "sha256": "58ff6f7334196733348bf1b516c1c9fdc2790339461e21ad216f6ed478496402"
+    },
+    {
+      "file": "services/rustcore/src/position_state.rs",
+      "sha256": "b75c36b31326de1cb611be70556ea9c4a1be16f2c379e407119222afb5724d85"
+    },
+    {
+      "file": "services/rustcore/src/reconcile.rs",
+      "sha256": "6abc2351dd2b30456cf508e2d6cfaea20ecba32e4890618f6a39913285afc604"
+    },
+    {
+      "file": "services/rustcore/src/store.rs",
+      "sha256": "f8b8e2b250b479a8a686e641cd0e202f70e59b0686bb929290d72b507e3db2e3"
+    },
+    {
+      "file": "services/rustcore/migrations/0039_position_close_revision.sql",
+      "sha256": "ad6a8951abf5ed01fae149a272c269af8716bb84e35c7a9b1e8bfda71e346077"
+    },
+    {
+      "file": "services/rustcore/migrations/0040_position_execution_provenance.sql",
+      "sha256": "f3691fad49a9f648ce9a2772fa6e8f1474098c05dc3b080f30a391ed1443cd2d"
+    },
+    {
+      "file": "services/rustcore/migrations/0041_position_close_requests.sql",
+      "sha256": "5111bc2750bc2fb4271b612b2bd9f2843b49a6f6fdf1a6718d0dc9d3517970aa"
+    }
+  ],
+  "target": {
+    "available": true,
+    "engine_boot_id": "01M3SS5KH8MNG18XDY72BTY132",
+    "observed_at_ms": 1790792885685,
+    "reason_code": "AVAILABLE",
+    "schema_version": 1,
+    "target": {
+      "bot_uid": "bot_exact_a",
+      "direction": "long",
+      "entry_engine_order_id": "01M3SS5RD3QJXYQ82PQDSATFHR",
+      "entry_epoch": "1",
+      "execution_venue": "simulation",
+      "exit_epoch": "0",
+      "position_id": "pos_01M3SS5RDDWYBDYNWM5TB030ZF",
+      "quantity": "10",
+      "revision": "2",
+      "run_mode": "paper",
+      "schema_version": 1,
+      "symbol_key": "binance|futures|BTC|USDT|USDT"
+    }
+  }
+}

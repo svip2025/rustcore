@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "evidence_id": "ev_01J00000000000000000000000",
+  "snapshot_id": "snap_2f8967e542b2baf1062f42b9b3497155",
+  "agent_id": "research.market.v1",
+  "model_id": "deepseek-reasoner",
+  "prompt_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "created_at_ms": 1786291205000,
+  "latency_ms": 0,
+  "token_usage": {
+    "input": 0,
+    "output": 0
+  },
+  "claims": [],
+  "abstained": true,
+  "abstain_reason": "insufficient evidence"
+}

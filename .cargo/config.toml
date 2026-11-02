@@ -1,0 +1,6 @@
+[env]
+# The loopback-only disposable MySQL fixture from docker-compose.yml.
+# Explicit caller environment variables take precedence over these defaults.
+RUSTCORE_TEST_MYSQL_URL = { value = "mysql://root@127.0.0.1:13306/mysql", force = false }
+RUSTCORE_REQUIRE_MYSQL_TESTS = { value = "1", force = false }
+RUST_TEST_THREADS = { value = "8", force = false }

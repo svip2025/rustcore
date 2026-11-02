@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "dataset_id": "ds_6b57decf36b7777b7e7fd26781300488",
+  "dataset_hash": "6b57decf36b7777b7e7fd267813004882325262df353a9eea68acc97cffffd0c",
+  "dataset_version": "btc-eth-major-regimes/v1",
+  "dataset_type": "locked_holdout",
+  "manifest_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "created_at_ms": 1786636800000,
+  "created_by": "quality-evaluator/v1",
+  "coverage_status": "available",
+  "market_episode_coverage": {
+    "trend_directions": ["up", "down"],
+    "range": true,
+    "volatility_bands": ["low", "high", "extreme"],
+    "liquidity_degraded": true,
+    "transition": true,
+    "event_shock": true,
+    "data_quality_scenarios": ["missing", "degraded"],
+    "supported_horizons": ["intraday", "swing", "position"],
+    "supported_assets": ["BTCUSDT", "ETHUSDT"]
+  }
+}

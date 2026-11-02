@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "created_at_ms": 1700000040000,
+  "router_version": "strategy-router-ts/v1",
+  "router_config_hash": "3fb132fd07115b0effc1eb1de2df2d18314a86ff61a86403d1b8a05fa6e352a3",
+  "effective_policy_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+  "horizon": "swing",
+  "regime_ref": {
+    "regime_id": "reg_95490831a4df79c99a4facf8698531df",
+    "regime_hash": "95490831a4df79c99a4facf8698531df5dc1b322376bf96f7d1041dd095f948e",
+    "snapshot_id": "snap_11111111111111111111111111111111",
+    "cycle_id": "cyc_regime_fixture_002",
+    "algorithm_version": "regime-classifier-ts/v1",
+    "algorithm_config_hash": "c57b411d37596f83bd1f98e0372c51dc69d5a6679ea6a89a77ab72e518400e64"
+  },
+  "route": "TREND",
+  "reasons": [
+    {
+      "code": "REGIME_TREND",
+      "source": "trend",
+      "threshold": "0.6"
+    }
+  ],
+  "fast_path": false,
+  "route_state": {
+    "current_route": "TREND",
+    "dwell_observations": 6,
+    "last_switch_at_ms": 1700000000000,
+    "pending_candidate": null
+  },
+  "route_id": "route_da23e7daa1a30489ad52bb06f62d9782",
+  "route_hash": "da23e7daa1a30489ad52bb06f62d97829631d863f6bb91716276f97b111269cf"
+}

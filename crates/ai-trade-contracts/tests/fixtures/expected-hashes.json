@@ -1,0 +1,152 @@
+{
+  "analysis-evidence-pullback.json": {
+    "canonical_sha256": "7f765452c86e0120c71c6cbb6a33e1a8add39553004fc54400f5aa526d554e27",
+    "contract_id": "ae_90e80fd47047ea726acebcca9c407bac",
+    "id_field": "evidence_id"
+  },
+  "data-snapshot-full.json": {
+    "canonical_sha256": "cf95ee897c696a4e08630afccc72d3b136c73904fd9b5959667b7cbf506570e1",
+    "contract_id": "snap_878087f21aa2077ef0524991c60ac455",
+    "id_field": "snapshot_id"
+  },
+  "data-snapshot-minimal.json": {
+    "canonical_sha256": "d4fb5cacbb01a2aa01d05d3eedc80d03e4c95b353e5b22a8ae369864e2208e1f",
+    "contract_id": "snap_2f8967e542b2baf1062f42b9b3497155",
+    "id_field": "snapshot_id"
+  },
+  "dataset-registry-entry-locked-holdout.json": {
+    "canonical_sha256": "d135dda95c1b35041575fcf476417d47c42ccd3aa889a052852d5e6a86b0c219",
+    "contract_id": "ds_6b57decf36b7777b7e7fd26781300488",
+    "id_field": "dataset_id"
+  },
+  "decision-intent-open-long.json": {
+    "canonical_sha256": "3a2f188464dba9c60a198a096c8721b45875bcdf1368285cbfe1f5a6e911b11c",
+    "contract_id": "di_13b9f1e1faa5e900fa0a118fa93a2d43",
+    "id_field": "intent_id"
+  },
+  "effective-policy-intraday-aggressive.json": {
+    "canonical_sha256": "f280f24b7f62751a5b993ba90f8b775d233cec5defe63e024212802b38d410fd",
+    "contract_id": "6bd627adfb02a598f3ddd49cbf994a84a7a33d9c2a4a6ec464376395f8fb4521",
+    "id_field": "policy_hash"
+  },
+  "effective-policy-intraday-balanced.json": {
+    "canonical_sha256": "e11943e7db2e74158f4dc70c99cf6731bf4a124f13b34af779f39c96efbbfc42",
+    "contract_id": "ab4cdb61d1c758fc9f465f1ec8c2d20be733c789a6683b9dd670e78cfb9ff4dd",
+    "id_field": "policy_hash"
+  },
+  "effective-policy-intraday-conservative.json": {
+    "canonical_sha256": "58d9ab428f80b6c49fbf78115c1c391c2158921d3cf3f3539c7331e8aff38bd5",
+    "contract_id": "ef72fb2ab8dae8f4e5792eddbed10230e93d5e770e21ba200e5922bb5a8075cf",
+    "id_field": "policy_hash"
+  },
+  "effective-policy-position-aggressive.json": {
+    "canonical_sha256": "115c435666cf3d1f2cf64785fecef2c3530652a5129321b9da361b96e246e5a8",
+    "contract_id": "7072890161ad0466bf11b40c6677b83c5b8d3aed7cc40d256e854e0e0b2d608a",
+    "id_field": "policy_hash"
+  },
+  "effective-policy-position-balanced.json": {
+    "canonical_sha256": "b9ce5351e1630babb13ed72c993050317a6d0b5799f6a64288b08a1337ed4870",
+    "contract_id": "106695f6e6cd417a6b98dbf2cd184d6bf671eb07406fd2e68027b21bc0a5ccb5",
+    "id_field": "policy_hash"
+  },
+  "effective-policy-position-conservative.json": {
+    "canonical_sha256": "826f1580882ecf8ba13b5b3551ff31661aa3c31962b0b2ef06c4c557216b4378",
+    "contract_id": "643f2ced0127a73bb652ace26d33a92e3086264d561f9006439b9b8091a7596b",
+    "id_field": "policy_hash"
+  },
+  "effective-policy-swing-aggressive.json": {
+    "canonical_sha256": "99f89b7d4ccb512873d27e3d480e88946096b331e09ef65239ab1df5d124c581",
+    "contract_id": "e824451dc0f57495a075395f7005539667660077a24df76304a1425764ae04a3",
+    "id_field": "policy_hash"
+  },
+  "effective-policy-swing-balanced.json": {
+    "canonical_sha256": "3ec31b257261d66f45faf8db92f442e0c0b36752d6456dc77f459b0006fead98",
+    "contract_id": "4ae51e94af90e0ba516591ca0d5d19a487f25b7d0160671c74be5486b0576205",
+    "id_field": "policy_hash"
+  },
+  "effective-policy-swing-conservative.json": {
+    "canonical_sha256": "9658f8e315cb51163cbb65a57679daf84579ac32bc0fa5b6efd27747395b53f9",
+    "contract_id": "232df1de7a8e499700190c07f85dd9280ab69a5f750e7bd092ed8db18212ddd1",
+    "id_field": "policy_hash"
+  },
+  "evaluation-run-result-pareto.json": {
+    "canonical_sha256": "9dbfac0538e2d5c62e9b4ebf02b2496b8b4bdc43d345ab87cf78ea1d53e30aad",
+    "contract_id": "eval_56ee3631c017a10d59058f2320480f35",
+    "id_field": "evaluation_run_id"
+  },
+  "evidence-full.json": {
+    "canonical_sha256": "74a2e6b86e6e5b55147b6290930a6a23bbc51cf609cf3e26f5b5b666f0cf1530",
+    "contract_id": "ev_01J00000000000000000000001",
+    "id_field": "evidence_id"
+  },
+  "evidence-minimal.json": {
+    "canonical_sha256": "dab04369960fc99769a4a0344bf308cc5283c3a29892620bf6b7fcbf01c0d78b",
+    "contract_id": "ev_01J00000000000000000000000",
+    "id_field": "evidence_id"
+  },
+  "experiment-lineage-rejected.json": {
+    "canonical_sha256": "8def15a70b14cac61adf660897578e00f67452e435078dc53692472df18b2469",
+    "contract_id": "lin_4c2f5b8038122c156fbf1043f56626d1",
+    "id_field": "lineage_id"
+  },
+  "learning-proposal-quality-router.json": {
+    "canonical_sha256": "f91abc4cf84d45b98d379f97f04c7faba3bae88cecb24f336ab88b59882fb972",
+    "contract_id": "lp_de5fa7148e524cc2d840622f0728e5a4",
+    "id_field": "proposal_id"
+  },
+  "market-analysis-context-swing.json": {
+    "canonical_sha256": "fe649deaeb604491741a5c077de56a382b6dae46598cb0c52a506d1779f640e2",
+    "contract_id": "mac_d12dfb39b48e1127ad66b9f7bad15888",
+    "id_field": "context_id"
+  },
+  "market-regime-aligned.json": {
+    "canonical_sha256": "54df6b67ed3d18060aae6f04a0b886a165a2dad3e56e815a7bba6652eb5fbde8",
+    "contract_id": "reg_68b36adefc91d540c16c496bb40e5077",
+    "id_field": "regime_id"
+  },
+  "market-regime-missing.json": {
+    "canonical_sha256": "7797577a036080bc16f20ac74a510f5d6c01b5a3d50d0f9839341a413234b1e6",
+    "contract_id": "reg_6a2423b06c5f2b9c2597b454c10900b0",
+    "id_field": "regime_id"
+  },
+  "market-regime-pullback.json": {
+    "canonical_sha256": "7833ddd6b09bc614337c20f578d9f9f283e1cc5411e0c0f03532d29a197bdb31",
+    "contract_id": "reg_95490831a4df79c99a4facf8698531df",
+    "id_field": "regime_id"
+  },
+  "member-decision-context-long.json": {
+    "canonical_sha256": "8b854217668667d74a151f6efc49a2a2f40505353666279ae98a4830e2873e82",
+    "contract_id": "mdc_0f5418ad24392f504f342b33d46fde3c",
+    "id_field": "context_id"
+  },
+  "risk-verdict-full.json": {
+    "canonical_sha256": "fbcaa31fa9f0c39f97a8d10e0c91993ba1d80775f9fa78854545476cf7e1cda2",
+    "contract_id": "rv_01J00000000000000000000001",
+    "id_field": "risk_verdict_id"
+  },
+  "risk-verdict-minimal.json": {
+    "canonical_sha256": "9073fda430216dfc5bb7b69b1002f98d56f4dc1c4b11812bd0edfa338518faf7",
+    "contract_id": "rv_01J00000000000000000000000",
+    "id_field": "risk_verdict_id"
+  },
+  "strategy-route-no-trade.json": {
+    "canonical_sha256": "34a96ef8b7c20d6c671b32c49a385ca41d1a27448fb48fedf04d5ea84a337df1",
+    "contract_id": "route_4f2155873fef37ce8408717b714c1a2f",
+    "id_field": "route_id"
+  },
+  "strategy-route-trend.json": {
+    "canonical_sha256": "29e92efa44801e04d3f0364bfe96f8213d6b23598785dfb26dabcaa251d852c6",
+    "contract_id": "route_da23e7daa1a30489ad52bb06f62d9782",
+    "id_field": "route_id"
+  },
+  "trading-intent-full.json": {
+    "canonical_sha256": "ba32ba542f7ef6d804c8ef4e0cbeac80ee3d66f1547dc54724254be298d975d5",
+    "contract_id": "int_01J00000000000000000000001",
+    "id_field": "intent_id"
+  },
+  "trading-intent-minimal.json": {
+    "canonical_sha256": "0f36d668a1d42d3ac99153a68b2cb4fa22fe4e724d99f3bcd4ebe734a71ecb73",
+    "contract_id": "int_01J00000000000000000000000",
+    "id_field": "intent_id"
+  }
+}

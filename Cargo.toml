@@ -1,0 +1,62 @@
+[workspace]
+members = [".", "crates/ai-trade-contracts", "crates/risk-policy"]
+default-members = [".", "crates/ai-trade-contracts", "crates/risk-policy"]
+
+[package]
+name = "rustcore"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[features]
+default = []
+l4-fault-injection = []
+
+[dependencies]
+ai-trade-contracts = { path = "crates/ai-trade-contracts" }
+anyhow = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+futures-core = "0.3"
+futures-util = "0.3"
+prost = "0.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_urlencoded = "0.7"
+sqlx = { version = "=0.8.6", features = ["runtime-tokio", "any", "sqlite", "mysql", "macros", "migrate"] }
+hmac = "0.12"
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+risk-policy = { path = "crates/risk-policy" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2"
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = "0.1"
+tokio-tungstenite = { version = "0.23", features = ["rustls-tls-webpki-roots"] }
+tonic = { version = "0.11", features = ["transport", "tls"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+libc = "0.2"
+ulid = "1.1"
+url = "2"
+webpki-roots = "0.26"
+
+[build-dependencies]
+protoc-bin-vendored = "3.3.0"
+tonic-build = "0.11"
+
+[dev-dependencies]
+hyper = { version = "=0.14.32", default-features = false, features = ["client", "http2", "tcp"] }
+
+# K07: SQLx 0.8.6 pool return/close lifecycle patch, vendored from the
+# crates.io sqlx-core 0.8.6 archive. See vendor/sqlx-core-0.8.6/PATCHES.md.
+[patch.crates-io]
+sqlx-core = { path = "vendor/sqlx-core-0.8.6" }
+
+# Keep first-time test builds small; assertions and overflow checks retain
+# Cargo's development/test defaults. Override locally when debugging.
+[profile.dev]
+debug = 0
+
+[profile.test]
+debug = 0

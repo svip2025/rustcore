@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "policy_version": "effective-policy/v1+risk-rules/v3+protection/v1",
+  "compiler_version": "policy-compiler-ts/v1",
+  "normalization_version": "decimal-canonical/v1",
+  "runtime_policy_hash": "sha256:b971156a9e430ad6150edffe3f3ddeaf4319b23b9d2cfc519d8b9c70294a1b4e",
+  "horizon": "intraday",
+  "risk_style": "aggressive",
+  "timeframes": {
+    "entry": "5m",
+    "primary": "15m",
+    "context": "1h",
+    "background": "4h"
+  },
+  "risk_style_template": {
+    "id": "aggressive",
+    "template_version": "risk-style-template/v1",
+    "parameters": {
+      "limits": {
+        "risk_per_trade_pct": "0.01",
+        "max_stop_distance_pct": "0.08",
+        "max_leverage": 20,
+        "max_slippage_bps": 25,
+        "max_position_notional_usdt": "2000",
+        "max_credential_notional_usdt": "10000",
+        "max_managed_capital_usdt": "2000",
+        "max_total_exposure_pct": "0.5",
+        "max_pair_exposure_pct": "0.25",
+        "max_concurrent_positions": 5,
+        "max_same_direction_positions": 3,
+        "max_correlated_group_exposure_pct": "0.35",
+        "max_daily_loss_pct": "0.05",
+        "max_drawdown_pct": "0.25"
+      },
+      "min_conviction_open": "0.55",
+      "min_conviction_open_short": "0.6",
+      "min_stop_distance_pct": "0.008",
+      "min_rr": "1.5"
+    }
+  },
+  "horizon_overlay": {
+    "horizon": "intraday",
+    "overlay_version": "horizon-overlay/v1",
+    "risk_parameters": {
+      "max_stop_distance_pct": "0.03",
+      "max_slippage_bps": 8,
+      "min_stop_distance_pct": "0.003",
+      "min_hold_minutes": 15,
+      "entry_cooldown_minutes_after_stop": 15,
+      "cost_aware_tp_multiple": "2.5"
+    }
+  },
+  "strategy_parameters": null,
+  "hard_limits": {
+    "platform_deployment": {
+      "source_version": "deployment-ceiling/v1",
+      "values": {
+        "risk_per_trade_pct": "0.02",
+        "max_stop_distance_pct": "0.12",
+        "max_leverage": 25,
+        "max_slippage_bps": 30,
+        "max_position_notional_usdt": "5000",
+        "max_credential_notional_usdt": "20000",
+        "max_managed_capital_usdt": "10000",
+        "max_total_exposure_pct": "0.6",
+        "max_pair_exposure_pct": "0.3",
+        "max_concurrent_positions": 6,
+        "max_same_direction_positions": 4,
+        "max_correlated_group_exposure_pct": "0.4",
+        "max_daily_loss_pct": "0.06",
+        "max_drawdown_pct": "0.3"
+      }
+    },
+    "venue_account": {
+      "capability_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "trading_account_id": 101,
+      "values": {
+        "risk_per_trade_pct": "0.03",
+        "max_stop_distance_pct": "0.15",
+        "max_leverage": 30,
+        "max_slippage_bps": 40,
+        "max_position_notional_usdt": "6000",
+        "max_credential_notional_usdt": "25000",
+        "max_managed_capital_usdt": "12500",
+        "max_total_exposure_pct": "0.8",
+        "max_pair_exposure_pct": "0.4",
+        "max_concurrent_positions": 8,
+        "max_same_direction_positions": 6,
+        "max_correlated_group_exposure_pct": "0.5",
+        "max_daily_loss_pct": "0.08",
+        "max_drawdown_pct": "0.4"
+      }
+    },
+    "member": {
+      "scope": "caller-declared-scope",
+      "subject_ref_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "confirmation_version": "confirmation/v1",
+      "values": {
+        "risk_per_trade_pct": "0.015",
+        "max_stop_distance_pct": "0.1",
+        "max_leverage": 20,
+        "max_slippage_bps": 28,
+        "max_position_notional_usdt": "4000",
+        "max_credential_notional_usdt": "15000",
+        "max_managed_capital_usdt": "7500",
+        "max_total_exposure_pct": "0.5",
+        "max_pair_exposure_pct": "0.25",
+        "max_concurrent_positions": 5,
+        "max_same_direction_positions": 3,
+        "max_correlated_group_exposure_pct": "0.35",
+        "max_daily_loss_pct": "0.05",
+        "max_drawdown_pct": "0.25"
+      }
+    },
+    "resolved": {
+      "risk_per_trade_pct": {
+        "value": "0.01",
+        "source_layer": "risk_style"
+      },
+      "max_stop_distance_pct": {
+        "value": "0.03",
+        "source_layer": "horizon"
+      },
+      "max_position_notional_usdt": {
+        "value": "2000",
+        "source_layer": "risk_style"
+      },
+      "max_credential_notional_usdt": {
+        "value": "10000",
+        "source_layer": "risk_style"
+      },
+      "max_managed_capital_usdt": {
+        "value": "2000",
+        "source_layer": "risk_style"
+      },
+      "max_total_exposure_pct": {
+        "value": "0.5",
+        "source_layer": "member"
+      },
+      "max_pair_exposure_pct": {
+        "value": "0.25",
+        "source_layer": "member"
+      },
+      "max_correlated_group_exposure_pct": {
+        "value": "0.35",
+        "source_layer": "member"
+      },
+      "max_daily_loss_pct": {
+        "value": "0.05",
+        "source_layer": "member"
+      },
+      "max_drawdown_pct": {
+        "value": "0.25",
+        "source_layer": "member"
+      },
+      "max_leverage": {
+        "value": 20,
+        "source_layer": "member"
+      },
+      "max_slippage_bps": {
+        "value": 8,
+        "source_layer": "horizon"
+      },
+      "max_concurrent_positions": {
+        "value": 5,
+        "source_layer": "member"
+      },
+      "max_same_direction_positions": {
+        "value": 3,
+        "source_layer": "member"
+      }
+    }
+  },
+  "runtime_policy": {
+    "policy_version": "effective-policy/v1+risk-rules/v3+protection/v1",
+    "schema_version": 1,
+    "preconditions": {
+      "require_data_quality_pass": true,
+      "risk_budget_max_age_ms": 30000,
+      "reject_expired_intent": true,
+      "require_risk_budget": true,
+      "require_kill_switch": true,
+      "require_data_snapshot": true,
+      "require_exchange_filters": false,
+      "require_typed_protection": true
+    },
+    "per_trade": {
+      "risk_per_trade_pct": 0.01,
+      "min_conviction_open": 0.55,
+      "min_conviction_open_short": 0.6,
+      "protection_required": true,
+      "min_stop_distance_pct": 0.008,
+      "max_stop_distance_pct": 0.03,
+      "min_rr": 1.5,
+      "fee_per_side": 0.0004,
+      "slippage_round_trip": 0.0002,
+      "cost_aware_tp_multiple": 2.5,
+      "max_leverage": 20,
+      "max_slippage_bps": 8,
+      "min_notional_usdt": 10
+    },
+    "portfolio": {
+      "max_position_notional_usdt": 2000,
+      "max_credential_notional_usdt": 10000,
+      "max_total_exposure_pct": 0.5,
+      "max_pair_exposure_pct": 0.25,
+      "max_concurrent_positions": 5,
+      "max_same_direction_positions": 3,
+      "max_correlated_group_exposure_pct": 0.35,
+      "correlation_groups": {
+        "majors": [
+          "BTC",
+          "ETH"
+        ],
+        "l1_alts": [
+          "SOL",
+          "AVAX",
+          "NEAR"
+        ]
+      },
+      "max_managed_capital_usdt": 2000
+    },
+    "account": {
+      "max_daily_loss_pct": 0.05,
+      "max_drawdown_pct": 0.25,
+      "min_equity_usdt": 100
+    },
+    "churn": {
+      "min_hold_minutes": 15,
+      "min_conviction_close": 0.8,
+      "entry_cooldown_minutes_after_stop": 15
+    },
+    "context_filters": {
+      "enabled": false,
+      "long_max_range_pos": 0.85,
+      "short_min_range_pos": 0.15,
+      "min_trend_score_long": 1,
+      "max_trend_score_short": -1,
+      "min_vol_ratio": 0.7
+    },
+    "symbol_controls": {
+      "disabled_for_open": [],
+      "disabled_for_short": []
+    }
+  },
+  "protection_plan_compiler": {
+    "rules_version": "protection-plan/v1",
+    "parameter_schema_version": "protection-parameters/v1",
+    "parameters": {
+      "mandatory_protection": true,
+      "require_stop_loss": true,
+      "require_take_profit": true,
+      "fail_closed_on_missing_protection": true,
+      "min_stop_distance_pct": "0.008",
+      "max_stop_distance_pct": "0.03",
+      "min_risk_reward": "1.5",
+      "rounding_mode": "venue_tick_fail_closed"
+    }
+  },
+  "policy_hash": "6bd627adfb02a598f3ddd49cbf994a84a7a33d9c2a4a6ec464376395f8fb4521"
+}

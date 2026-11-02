@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "snapshot_id": "snap_878087f21aa2077ef0524991c60ac455",
+  "created_at_ms": 1786291200000,
+  "bot_uid": "bot_01J00000000000000000000001",
+  "symbol_key": "binance|futures|BTC|USDT|USDT",
+  "sources": [
+    {
+      "capability": "ohlcv",
+      "provider": "binance_futures_rest",
+      "endpoint": "/fapi/v1/klines",
+      "as_of_ms": 1786291195000,
+      "latency_ms": 142,
+      "degraded": false
+    },
+    {
+      "capability": "funding_rate",
+      "provider": "binance_futures_rest",
+      "as_of_ms": 1786291190000,
+      "latency_ms": 160,
+      "degraded": true,
+      "fallback_from": "primary_market_stream"
+    },
+    {
+      "capability": "account_state",
+      "provider": "rustcore_reconcile",
+      "as_of_ms": 1786291180000,
+      "degraded": false
+    }
+  ],
+  "market": {
+    "last_price": "63241.50",
+    "timeframe_main": "15m",
+    "candles": {
+      "15m": [
+        {
+          "open_time_ms": 1786290300000,
+          "o": "63100.00",
+          "h": "63300.00",
+          "l": "63000.00",
+          "c": "63241.50",
+          "v": "12.5",
+          "closed": true
+        }
+      ],
+      "1h": [
+        {
+          "open_time_ms": 1786287600000,
+          "o": "62800.00",
+          "h": "63400.00",
+          "l": "62750.00",
+          "c": "63241.50",
+          "v": "48.2",
+          "closed": true
+        }
+      ]
+    },
+    "indicators": {
+      "15m": {
+        "ema_short": 63180.2,
+        "ema_long": 62950.1,
+        "rsi_14": 57.3,
+        "macd": 12.4,
+        "macd_signal": 9.8,
+        "macd_hist": 2.6,
+        "bb_upper": 63800.0,
+        "bb_middle": 63100.0,
+        "bb_lower": 62400.0,
+        "atr_14": 380.5,
+        "vol_ratio": 1.24
+      },
+      "1h": {
+        "ema_short": 63020.2,
+        "ema_long": 62750.1,
+        "rsi_14": 55.1,
+        "macd": 20.4,
+        "macd_signal": 18.2,
+        "macd_hist": 2.2,
+        "bb_upper": 64000.0,
+        "bb_middle": 63000.0,
+        "bb_lower": 62000.0,
+        "atr_14": 710.5,
+        "vol_ratio": 1.1
+      }
+    },
+    "derivatives": {
+      "funding_rate": 0.00012,
+      "next_funding_ms": 1786320000000,
+      "open_interest": "48213.5"
+    }
+  },
+  "account": {
+    "equity_usdt": "10432.18",
+    "available_usdt": "8120.44",
+    "used_margin_usdt": "2311.74",
+    "today_realized_pnl_usdt": "-83.20",
+    "open_positions_count": 1,
+    "positions": [
+      {
+        "symbol_key": "binance|futures|BTC|USDT|USDT",
+        "side": "long",
+        "qty": "0.036",
+        "entry_price": "62880.00",
+        "mark_price": "63241.50",
+        "leverage": 3,
+        "unrealized_pnl_usdt": "13.01",
+        "liquidation_price": "42150.00",
+        "opened_at_ms": 1786280000000,
+        "age_minutes": 186.5,
+        "protection": {
+          "sl_order_id": "eo_01J00000000000000000000000",
+          "sl_price": "61000.00",
+          "tp_order_id": "eo_01J00000000000000000000001",
+          "tp_price": "67000.00",
+          "verified_at_ms": 1786280060000
+        }
+      }
+    ]
+  },
+  "quality": {
+    "gate": "degraded",
+    "checks": [
+      {
+        "name": "closed_bar_only",
+        "ok": true,
+        "detail": "all main-tf bars closed"
+      },
+      {
+        "name": "funding_provider",
+        "ok": false,
+        "detail": "fallback provider used"
+      }
+    ],
+    "allow_open": false,
+    "allow_close": true
+  }
+}

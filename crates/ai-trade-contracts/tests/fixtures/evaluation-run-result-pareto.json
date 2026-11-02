@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "evaluation_run_id": "eval_56ee3631c017a10d59058f2320480f35",
+  "evaluation_run_hash": "56ee3631c017a10d59058f2320480f356070a393d1bc9c7bb62207d9261968fd",
+  "candidate_id": "candidate_router_v2",
+  "champion_id": "champion_router_v1",
+  "dataset_assignment_id": "dsa_quality_router_v2",
+  "datasets_evaluated": [
+    {
+      "dataset_id": "ds_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "dataset_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "lifecycle_mapping": {
+    "challenger_step": "replay",
+    "stage_relation": "evaluation_evidence",
+    "formal_stage": null
+  },
+  "safety_verdict": {
+    "status": "passed",
+    "regressions": []
+  },
+  "quality_metrics_status": "available",
+  "baseline_quality_metrics": {
+    "net_return": { "status": "available", "value": 0.1 },
+    "max_drawdown": { "status": "available", "value": 0.08 },
+    "risk_adjusted_return": { "status": "available", "value": 1.2 },
+    "robustness": { "status": "available", "value": 0.8 },
+    "decision_quality": { "status": "available", "value": 0.75 },
+    "cost_latency": { "status": "available", "value": 10 },
+    "abstention_quality": { "status": "available", "value": 0.7 }
+  },
+  "challenger_quality_metrics": {
+    "net_return": { "status": "available", "value": 0.12 },
+    "max_drawdown": { "status": "available", "value": 0.08 },
+    "risk_adjusted_return": { "status": "available", "value": 1.2 },
+    "robustness": { "status": "available", "value": 0.8 },
+    "decision_quality": { "status": "available", "value": 0.75 },
+    "cost_latency": { "status": "available", "value": 10 },
+    "abstention_quality": { "status": "available", "value": 0.7 }
+  },
+  "quality_comparison": {
+    "status": "pareto_improvement",
+    "improved_dimensions": ["net_return"],
+    "regressed_dimensions": [],
+    "unavailable_dimensions": []
+  },
+  "sufficiency_verdict": {
+    "status": "sufficient",
+    "gaps": []
+  },
+  "recommended_action": {
+    "path": "quality",
+    "action": "recommend_evaluation_advancement",
+    "reason": "Sufficient evidence supports a Pareto improvement."
+  },
+  "deployment_authorization": false,
+  "evaluated_at_ms": 1786636800200
+}

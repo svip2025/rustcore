@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "intent_id": "di_13b9f1e1faa5e900fa0a118fa93a2d43",
+  "intent_hash": "13b9f1e1faa5e900fa0a118fa93a2d43ad477dc13b59f36f523e2eb01fad9747",
+  "created_at_ms": 1700000044000,
+  "decision_agent_id": "decision.v1",
+  "model_id": "fixture-model-v1",
+  "prompt_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "member_context_id": "mdc_0f5418ad24392f504f342b33d46fde3c",
+  "member_context_hash": "0f5418ad24392f504f342b33d46fde3ce9a041bb5b5d2aba092daa962ad9b88b",
+  "analysis_evidence_id": "ae_90e80fd47047ea726acebcca9c407bac",
+  "analysis_evidence_hash": "90e80fd47047ea726acebcca9c407bac09471096e8a7d2e64b2a7f824678bbd2",
+  "logical_action": "OPEN_LONG",
+  "confidence": {
+    "status": "available",
+    "value": 0.68
+  },
+  "thesis": {
+    "status": "available",
+    "value": "The pullback may resume with the higher-timeframe trend."
+  },
+  "invalidation": {
+    "status": "available",
+    "value": "The higher-timeframe trend loses structure."
+  },
+  "referenced_evidence": [
+    {
+      "analysis_evidence_id": "ae_90e80fd47047ea726acebcca9c407bac",
+      "analysis_evidence_hash": "90e80fd47047ea726acebcca9c407bac09471096e8a7d2e64b2a7f824678bbd2",
+      "evidence_ref": "regime.multi_timeframe_relationship"
+    }
+  ],
+  "expected_horizon": "swing",
+  "abstain_reason": null,
+  "entry_preference": "pullback"
+}

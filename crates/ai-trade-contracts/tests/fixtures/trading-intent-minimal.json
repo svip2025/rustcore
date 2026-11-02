@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "intent_id": "int_01J00000000000000000000000",
+  "bot_uid": "bot_01J00000000000000000000000",
+  "run_id": "run_01J00000000000000000000000",
+  "cycle_id": "cyc_01J00000000000000000000000",
+  "snapshot_id": "snap_2f8967e542b2baf1062f42b9b3497155",
+  "evidence_ids": [],
+  "decision_agent_id": "decision.ensemble.v1",
+  "model_ids": ["decision-stub-v1"],
+  "prompt_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "config_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "policy_version": "risk_policy_v3",
+  "action": "hold",
+  "symbol_key": "binance|futures|BTC|USDT|USDT",
+  "entry": {
+    "order_type": "market",
+    "limit_price": null,
+    "max_slippage_bps": 15
+  },
+  "protection": {
+    "stop_loss_price": "61000.00",
+    "take_profit_price": "67000.00",
+    "required": false
+  },
+  "conviction": 0,
+  "valid_until_ms": 1786292100000,
+  "reasoning": "",
+  "reasoning_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+}

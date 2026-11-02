@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "evidence_id": "ev_01J00000000000000000000001",
+  "snapshot_id": "snap_878087f21aa2077ef0524991c60ac455",
+  "agent_id": "research.market.v1",
+  "model_id": "deepseek-reasoner",
+  "prompt_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "created_at_ms": 1786291205000,
+  "latency_ms": 3120,
+  "token_usage": {
+    "input": 4210,
+    "output": 380
+  },
+  "claims": [
+    {
+      "claim": "15m/1h EMA aligned upward",
+      "stance": "bullish",
+      "confidence": 0.72,
+      "refs": [
+        "market.indicators.15m.macd_hist",
+        "market.indicators.1h.ema_short"
+      ]
+    }
+  ],
+  "abstained": false,
+  "abstain_reason": null
+}

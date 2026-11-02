@@ -1,0 +1,1084 @@
+syntax = "proto3";
+
+package execution_engine.v2;
+
+// P1/T1.7-b boundary: ExecuteIntents and recovery management RPCs are
+// implemented. Event streaming and the remaining trading helpers retain their
+// explicit UNIMPLEMENTED boundary.
+//
+// Rust Core -> Python Orchestrator event delivery remains at-least-once. A v2
+// consumer must dedupe by (seq, event_id) and resume by since_seq.
+
+service EngineExecution {
+  // B8: monotonic credential Entry admission on this executing process only.
+  // Membership/binding authorization remains the trusted caller's obligation.
+  // This does not cancel orders, settle obligations, disable a key, or close an account.
+  rpc ArmLifecycleFence(ArmLifecycleFenceRequest) returns (LifecycleFenceResponse);
+  rpc GetLifecycleFence(GetLifecycleFenceRequest) returns (LifecycleFenceResponse);
+  // B3-K1: exact, revision-bound paper close. Member authorization and the
+  // close_holding password challenge remain the upstream caller's obligation.
+  rpc GetPositionCloseTarget(GetPositionCloseTargetRequest) returns (GetPositionCloseTargetResponse);
+  rpc ClosePosition(ClosePositionRequest) returns (ClosePositionResponse);
+  rpc GetPositionCloseReceipt(GetPositionCloseReceiptRequest) returns (ClosePositionResponse);
+  rpc ExecuteIntents(ExecuteIntentsRequest) returns (ExecuteIntentsResponse);
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
+  rpc GetOpenOrders(GetOpenOrdersRequest) returns (GetOpenOrdersResponse);
+  rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
+  rpc ReconcileNow(ReconcileNowRequest) returns (ReconcileNowResponse);
+  rpc EnsureMarketData(EnsureMarketDataRequest) returns (EnsureMarketDataResponse);
+  rpc GetPositionStates(GetPositionStatesRequest) returns (GetPositionStatesResponse);
+  rpc GetAccountState(GetAccountStateRequest) returns (GetAccountStateResponse);
+  // Passive, bounded account projection. Never refreshes venue truth or repairs state.
+  rpc GetAccountOrderState(GetAccountOrderStateRequest) returns (GetAccountOrderStateResponse);
+  rpc GetOrderByClientOrderId(GetOrderByClientOrderIdRequest) returns (GetOrderByClientOrderIdResponse);
+  rpc ReleasePending(ReleasePendingRequest) returns (ReleasePendingResponse);
+  rpc FundSimulationAccount(FundSimulationAccountRequest) returns (FundSimulationAccountResponse);
+  rpc PutRiskBudget(PutRiskBudgetRequest) returns (PutRiskBudgetResponse);
+  rpc PutPromotionCertification(PutPromotionCertificationRequest) returns (PutPromotionCertificationResponse);
+  rpc SetKillSwitch(SetKillSwitchRequest) returns (SetKillSwitchResponse);
+  rpc ResetKillSwitch(ResetKillSwitchRequest) returns (ResetKillSwitchResponse);
+  // P4b read-only projection of authoritative kill-switch state. Zero write
+  // side effects: never arms, resets, latches, or drives reconcile.
+  rpc GetKillSwitchStates(GetKillSwitchStatesRequest) returns (GetKillSwitchStatesResponse);
+  // P4b platform admission gate for member resets (ruling #35 D10): approves
+  // the CURRENT boot only, bound to the operator's verification-time
+  // expected_boot_id / expected_admission_version.
+  rpc AdmitMemberReset(AdmitMemberResetRequest) returns (AdmitMemberResetResponse);
+}
+
+service EngineEvents {
+  rpc StreamEvents(StreamEventsRequest) returns (stream EngineEvent);
+}
+
+message ExecuteIntentsRequest {
+  string credential_id = 1;
+  string run_mode = 2; // paper|live
+  repeated OrderIntent intents = 3;
+  // One immutable snapshot decision applies to this execution batch. The
+  // complete DataSnapshot is already durably stored in data_snapshots; the
+  // engine only needs its decision fields and content-addressed audit id.
+  DataSnapshotDecision data_snapshot = 4;
+  uint32 schema_version = 1000;
+}
+
+message DataSnapshotDecision {
+  string snapshot_id = 1; // snap_<32 lowercase hex>; links to data_snapshots.
+  string quality_gate = 2; // pass|degraded|fail
+  bool allow_open = 3;
+  bool allow_close = 4;
+  int64 created_at_ms = 5;
+  uint32 schema_version = 1000;
+}
+
+message ExecuteIntentsResponse {
+  repeated IntentAck acks = 1;
+  uint32 schema_version = 1000;
+}
+
+message OrderIntent {
+  reserved 10, 13, 20, 21;
+  reserved "side", "quantity", "max_position_notional", "max_credential_notional";
+
+  // Fields shared with v1 retain their wire numbers. New or changed v2 fields
+  // use previously unused numbers so a v1 payload cannot be misinterpreted.
+  string bot_uid = 1;
+  string run_id = 2;
+  string cycle_id = 3;
+  string idempotency_key = 4; // Business-semantic key; see 02-CONTRACTS.md section 6.2.
+  string client_order_id_short = 5;
+  string exchange = 6;
+  string market_kind = 7;
+  string symbol_key = 8;
+  string action = 9; // open_long|open_short|close_long|close_short|hold
+  string order_type = 11; // market|limit
+  string limit_price = 12; // Decimal string; empty unless order_type=limit.
+  bool reduce_only = 14; // Derived by OMS from action; never chosen by the LLM.
+
+  string intent_id = 22; // int_<ULID>, aligned with TradingIntent.
+  uint32 max_slippage_bps = 23;
+  Protection protection = 24;
+  string policy_version = 25;
+  int64 valid_until_ms = 26;
+  string config_hash = 27; // 64 lowercase hex, without the sha256: prefix.
+  string prompt_hash = 28; // sha256:<64 lowercase hex>.
+  string code_commit = 29; // Full 40-character Git commit.
+  uint32 schema_version = 1000;
+}
+
+message Protection {
+  bool required = 1;
+  string stop_loss_price = 2; // Decimal string.
+  string take_profit_price = 3; // Decimal string.
+  uint32 confirm_timeout_ms = 4; // Confirmation timeout causes flatten.
+  uint32 schema_version = 1000;
+}
+
+message IntentAck {
+  reserved 3;
+
+  string idempotency_key = 1;
+  string engine_order_id = 2;
+  string message = 4;
+  string risk_verdict_id = 5; // rv_<ULID>, aligned with RiskVerdict.
+  Status status = 6;
+  string reject_reason_code = 7; // Stable value from 02-CONTRACTS.md section 5.2.
+  uint32 schema_version = 1000;
+}
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_ACCEPTED = 1;
+  STATUS_DUPLICATE = 2;
+  STATUS_REJECTED = 3;
+  STATUS_ERROR = 4;
+}
+
+message StreamEventsRequest {
+  string credential_id = 1;
+  uint64 since_seq = 2; // Replay events where seq > since_seq.
+  uint32 schema_version = 1000;
+}
+
+message EngineEvent {
+  reserved 5, 14, 30;
+  reserved "client_order_id_short", "payload_json";
+
+  string credential_id = 1;
+  uint64 seq = 2;
+  string event_id = 3;
+  int64 ts_ms = 4;
+  EventType event_type = 6;
+
+  string bot_uid = 10;
+  string run_id = 11;
+  string cycle_id = 12;
+  string idempotency_key = 13;
+  string exchange_order_id = 15;
+  string exchange = 16;
+  string market_kind = 17;
+  string symbol_key = 18;
+  string intent_id = 19; // int_<ULID>, aligned with TradingIntent.
+  string engine_order_id = 20;
+
+  oneof payload {
+    OrderAck order_ack = 40;
+    Fill fill = 41;
+    Cancel cancel = 42;
+    Reject reject = 43;
+    PositionUpdate position_update = 44;
+    ReconcileDiff reconcile_diff = 45;
+    ProtectionState protection_state = 46;
+    BarClosed bar_closed = 47;
+    EngineError error = 48;
+  }
+
+  uint32 schema_version = 1000;
+}
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_ORDER_ACK = 1;
+  EVENT_TYPE_FILL = 2;
+  EVENT_TYPE_CANCEL = 3;
+  EVENT_TYPE_REJECT = 4;
+  EVENT_TYPE_POSITION_UPDATE = 5;
+  EVENT_TYPE_RECONCILE_DIFF = 6;
+  EVENT_TYPE_PROTECTION_STATE = 7;
+  EVENT_TYPE_BAR_CLOSED = 8;
+  EVENT_TYPE_ERROR = 9;
+}
+
+message OrderAck {
+  string engine_order_id = 1;
+  string exchange_order_id = 2;
+  Status status = 3;
+  string message = 4;
+  uint32 schema_version = 1000;
+}
+
+message Fill {
+  string engine_order_id = 1;
+  string exchange_order_id = 2;
+  string exchange_trade_id = 3;
+  string fill_qty = 4; // Decimal string.
+  string fill_price = 5; // Decimal string.
+  string cumulative_filled_qty = 6; // Decimal string.
+  string fee = 7; // Decimal string.
+  string fee_asset = 8;
+  string realized_pnl = 9; // Decimal string.
+  int64 exchange_ts_ms = 10;
+  uint32 schema_version = 1000;
+}
+
+message Cancel {
+  string engine_order_id = 1;
+  string exchange_order_id = 2;
+  string reason = 3;
+  uint32 schema_version = 1000;
+}
+
+message Reject {
+  string reject_reason_code = 1; // Stable value from 02-CONTRACTS.md section 5.2.
+  string message = 2;
+  uint32 schema_version = 1000;
+}
+
+message PositionUpdate {
+  string position_id = 1;
+  string side = 2; // long|short
+  string qty = 3; // Decimal string.
+  string entry_price = 4; // Decimal string.
+  string mark_price = 5; // Decimal string.
+  string unrealized_pnl_usdt = 6; // Decimal string.
+  uint32 schema_version = 1000;
+}
+
+message ReconcileDiff {
+  bool has_diff = 1;
+  string summary = 2;
+  uint32 schema_version = 1000;
+}
+
+message ProtectionState {
+  string position_id = 1;
+  bool sl_present = 2;
+  bool tp_present = 3;
+  string sl_exchange_order_id = 4;
+  string tp_exchange_order_id = 5;
+  string sl_stop_price = 6; // Decimal string.
+  bool verified_from_exchange = 7;
+  int64 verified_at_ms = 8;
+  uint32 schema_version = 1000;
+}
+
+message BarClosed {
+  string exchange = 1;
+  string market_kind = 2;
+  string symbol_key = 3;
+  string timeframe = 4;
+  int64 open_time_ms = 5;
+  int64 close_time_ms = 6;
+  string close_price = 7; // Decimal string.
+  uint32 schema_version = 1000;
+}
+
+message EngineError {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+  uint32 schema_version = 1000;
+}
+
+message GetOrderRequest {
+  string credential_id = 1;
+  string engine_order_id = 2;
+  uint32 schema_version = 1000;
+}
+
+message GetOrderResponse {
+  bool found = 1;
+  EngineOrder order = 2;
+  uint32 schema_version = 1000;
+}
+
+message GetOpenOrdersRequest {
+  string credential_id = 1;
+  string symbol_key = 2;
+  string cycle_id = 3;
+  uint32 schema_version = 1000;
+}
+
+message GetOpenOrdersResponse {
+  repeated EngineOrder orders = 1;
+  uint32 schema_version = 1000;
+}
+
+message CancelOrderRequest {
+  string credential_id = 1;
+  string engine_order_id = 2;
+  string reason = 3;
+  uint32 schema_version = 1000;
+}
+
+message CancelOrderResponse {
+  bool accepted = 1;
+  string message = 2;
+  uint32 schema_version = 1000;
+}
+
+message ReconcileNowRequest {
+  string credential_id = 1;
+  string reason = 2;
+  uint32 schema_version = 1000;
+}
+
+message ReconcileNowResponse {
+  bool accepted = 1;
+  string message = 2;
+  bool completed = 3;
+  bool has_diff = 4;
+  bool all_positions_zero = 5;
+  bool all_open_orders_empty = 6;
+  bool local_position_zero_diff = 7;
+  // The engine already computes normal-open and algo-open (stop/take-profit)
+  // emptiness from two separate exchange listings, and its ReconcileTruth
+  // carries both. Field 6 alone therefore cannot answer "is the venue flat":
+  // a credential with zero normal open orders can still hold live algo orders.
+  // New wire number 8 so a peer built before this field still parses the rest.
+  bool all_open_algo_orders_empty = 8;
+  uint32 schema_version = 1000;
+}
+
+message EnsureMarketDataRequest {
+  string credential_id = 1;
+  repeated MarketDataSubscription subscriptions = 2;
+  uint32 schema_version = 1000;
+}
+
+message MarketDataSubscription {
+  string exchange = 1;
+  string market_kind = 2;
+  string symbol_key = 3;
+  string timeframe = 4;
+  uint32 schema_version = 1000;
+}
+
+message EnsureMarketDataResponse {
+  bool accepted = 1;
+  string message = 2;
+  uint32 started = 3;
+  uint32 schema_version = 1000;
+}
+
+message GetPositionStatesRequest {
+  string credential_id = 1; // Required.
+  string bot_uid = 2; // Optional filter; empty means all bots for credential.
+  bool include_closed = 3; // Defaults to false.
+  uint32 schema_version = 1000;
+}
+
+message GetPositionStatesResponse {
+  repeated PositionState positions = 1;
+  repeated OrphanPosition orphan_positions = 2;
+  uint32 schema_version = 1000;
+}
+
+message GetAccountStateRequest {
+  string credential_id = 1; // Required.
+  string bot_uid = 2; // Optional filter for positions; account totals remain credential-wide.
+  uint32 schema_version = 1000;
+}
+
+message GetAccountStateResponse {
+  // false means callers must fail the account snapshot gate. In that case all
+  // optional monetary fields are absent rather than synthesized as zero.
+  bool available = 1;
+  string unavailable_reason = 2;
+  // Exchange-backed: conservative older timestamp across reconciled balance and
+  // position truth. Simulation holding: oldest accepted mark close timestamp;
+  // simulation flat: local truth observation timestamp. Never a receipt time.
+  int64 as_of_ms = 3;
+
+  // AccountSnapshot-compatible monetary values are decimal strings. These are
+  // optional so unavailable truth and a real numeric zero remain distinguishable.
+  optional string equity_usdt = 4; // Derived: USDT wallet balance + all unrealized PnL.
+  optional string available_usdt = 5; // Exchange-reported USDT available balance.
+  optional string used_margin_usdt = 6; // Derived: equity_usdt - available_usdt.
+  optional string today_realized_pnl_usdt = 7; // Derived: UTC-day engine fill sum.
+  optional uint64 open_positions_count = 8;
+  repeated AccountPosition positions = 9;
+
+  // Machine-readable provenance for values that are computed rather than
+  // directly reported by the exchange.
+  repeated string derived_fields = 10;
+  // Native time of this account read, independent of the source/mark age above.
+  // Absent in older producers and unavailable responses; consumers must not
+  // replace absence with HTTP receipt time or another endpoint's observation.
+  optional int64 observed_at_ms = 11;
+  uint32 schema_version = 1000;
+}
+
+message AccountPosition {
+  string symbol_key = 1;
+  string side = 2; // long|short
+  string qty = 3; // Absolute decimal string.
+  string entry_price = 4; // Decimal string.
+  string mark_price = 5; // Decimal string.
+  uint32 leverage = 6;
+  string unrealized_pnl_usdt = 7; // Decimal string.
+  // Absent means the exchange omitted liquidationPrice. Never synthesize "0".
+  optional string liquidation_price = 8;
+  int64 opened_at_ms = 9;
+  double age_minutes = 10; // Derived: (as_of_ms - opened_at_ms) / 60000.
+  // Original price fact and independent native receipt. Absent on older/live producers.
+  optional MarkQuoteTruth mark_truth = 11;
+  uint32 schema_version = 1000;
+}
+
+message MarkQuoteTruth {
+  string source_kind = 1; // offline_fixture_quote|accepted_closed_bar
+  string source_fixture = 2; // Empty for a legacy closed bar, never relabelled as a quote.
+  string run_mode = 3;
+  string credential_id = 4;
+  string symbol_key = 5;
+  string raw_price = 6;
+  int64 source_timestamp_ms = 7;
+  int64 received_at_ms = 8;
+  uint32 schema_version = 1000;
+}
+
+message OrphanPosition {
+  string credential_id = 1;
+  string exchange = 2;
+  string market_kind = 3;
+  string symbol_key = 4;
+  string direction = 5;
+  string qty = 6;
+  string entry_price = 7;
+  string mark_price = 8;
+  int64 observed_at_ms = 9;
+  uint32 schema_version = 1000;
+}
+
+message GetOrderByClientOrderIdRequest {
+  string credential_id = 1;
+  string client_order_id_short = 2;
+  uint32 schema_version = 1000;
+}
+
+message GetOrderByClientOrderIdResponse {
+  bool completed = 1;
+  bool found = 2;
+  EngineOrder order = 3;
+  bool confirmed_never_filled = 4;
+  string message = 5;
+  uint32 schema_version = 1000;
+}
+
+message ReleasePendingRequest {
+  string credential_id = 1;
+  string position_id = 2;
+  string client_order_id_short = 3;
+  uint32 schema_version = 1000;
+}
+
+message ReleasePendingResponse {
+  bool released = 1;
+  int64 entry_epoch = 2;
+  string message = 3;
+  uint32 schema_version = 1000;
+}
+
+// Narrow paper-only mutation. This is not a generic balance writer and must
+// reject every exchange-backed credential before touching engine state.
+message FundSimulationAccountRequest {
+  string credential_id = 1; // Exact paper or paper:<32 lowercase hex> identity.
+  string amount_usdt = 2; // Positive decimal string; added to wallet and available truth.
+  string idempotency_identity = 3; // Durable identity for exactly-once funding application.
+  uint32 schema_version = 1000;
+}
+
+message FundSimulationAccountResponse {
+  bool accepted = 1;
+  bool applied = 2; // false only for a numerically compatible durable replay.
+  string message = 3;
+  string wallet_balance_usdt = 4;
+  uint32 schema_version = 1000;
+}
+
+message PutRiskBudgetRequest {
+  string credential_id = 1;
+  int64 as_of_ms = 2;
+  optional string equity_usdt = 3;
+  optional string available_usdt = 4;
+  optional string today_realized_pnl_usdt = 5;
+  optional double today_realized_pnl_pct = 6;
+  optional double drawdown_pct = 7;
+  optional double total_exposure_pct = 8;
+  optional int64 open_positions_count = 9;
+  optional string group_exposure_json = 10;
+  optional string kill_switch_level = 11;
+  optional string kill_switch_scope = 12;
+  optional string kill_switch_reason = 13;
+  optional string remaining_credential_notional_usdt = 14;
+  uint32 schema_version = 1000;
+}
+
+message PutRiskBudgetResponse {
+  bool accepted = 1;
+  bool applied = 2;
+  string message = 3;
+  int64 current_as_of_ms = 4;
+  uint32 schema_version = 1000;
+}
+
+// Control-plane projection of one authoritative MySQL certification. The
+// engine never queries MySQL while evaluating an order; it matches only this
+// local projection inside the verdict transaction.
+message PutPromotionCertificationRequest {
+  string cert_id = 1;
+  string bot_uid = 2;
+  string stage = 3; // paper|demo|live_small|live
+  string config_hash = 4;
+  string prompt_hash = 5;
+  string policy_version = 6;
+  string code_commit = 7;
+  bool passed = 8;
+  optional int64 invalidated_at_ms = 9;
+  int64 certified_at_ms = 10;
+  uint32 schema_version = 1000;
+}
+
+message PutPromotionCertificationResponse {
+  bool accepted = 1;
+  bool applied = 2;
+  string message = 3;
+  uint32 schema_version = 1000;
+}
+
+message SetKillSwitchRequest {
+  string scope_key = 1; // global | cred:<id> | bot:<uid>
+  string level = 2; // pause_new | manage_only | flatten
+  string reason = 3;
+  string trigger_source = 4; // manual_api | auto_reconcile_diff
+  string actor = 5;
+  // P4b member-source fields (ruling #35). Member arm (risk-reducing) carries
+  // NO expected revision: the engine applies the ownership transition table
+  // atomically in its own transaction under strictest semantics.
+  optional int64 expected_authority_revision = 6; // member reset path only
+  optional int32 authority_member_id = 7; // integer member identity for member_api
+  optional string request_ref = 8; // canonical ULID; echoed on the response
+  uint32 schema_version = 1000;
+}
+
+message SetKillSwitchResponse {
+  bool accepted = 1;
+  string scope_key = 2;
+  string level = 3;
+  string flatten_state = 4;
+  string message = 5;
+  optional string request_ref = 6;
+  uint32 schema_version = 1000;
+}
+
+message ResetKillSwitchRequest {
+  string scope_key = 1;
+  string reset_by = 2;
+  // P4b: MEMBER-constrained reset is server-fixed by the orchestrator member
+  // endpoint; absence means the legacy unconstrained platform path with
+  // byte-identical semantics.
+  optional ResetAuthority reset_authority = 3;
+  optional int64 expected_authority_revision = 4; // challenge-issued g; required for MEMBER
+  optional int32 authority_member_id = 5; // required for MEMBER
+  optional string request_ref = 6; // canonical ULID; echoed on the response
+  uint32 schema_version = 1000;
+}
+
+message ResetKillSwitchResponse {
+  bool accepted = 1;
+  string scope_key = 2;
+  string level = 3;
+  string message = 4;
+  optional string request_ref = 5;
+  uint32 schema_version = 1000;
+}
+
+// P4b tri-state for truth bits persisted as nullable columns. UNKNOWN means
+// "no honest value exists" (legacy row / never projected) and must never be
+// silently coerced to false or a measured zero (engine safety contract).
+enum KillSwitchTriState {
+  KSTRI_UNKNOWN = 0;
+  KSTRI_FALSE = 1;
+  KSTRI_TRUE = 2;
+}
+
+// P4b reset authorization constraint carried on the wire. UNCONSTRAINED is
+// the proto3 default and keeps the platform path unchanged; MEMBER must be
+// constructed server-side by the orchestrator member endpoint and is never
+// derivable from a missing field (fail-closed, no implicit privilege).
+enum ResetAuthority {
+  RESET_AUTHORITY_UNCONSTRAINED = 0;
+  RESET_AUTHORITY_MEMBER = 1;
+}
+
+message KillSwitchConvergenceRow {
+  string credential_id = 1;
+  string expected_provenance = 2; // arm_snapshot | reconcile_discovery | legacy_isolated | legacy_unprovable | "" (row absent semantics differ by caller)
+  KillSwitchTriState reconcile_clean = 3; // persisted boolean projection; a row that exists reports TRUE/FALSE
+  KillSwitchTriState flatten_complete = 4;
+  // Five truth bits (migration n3). Legacy rows / never-projected values stay
+  // KSTRI_UNKNOWN; they are NOT derivable from the two aggregates above.
+  KillSwitchTriState all_positions_zero = 5;
+  KillSwitchTriState all_open_orders_empty = 6;
+  KillSwitchTriState all_open_algo_orders_empty = 7;
+  KillSwitchTriState local_position_zero_diff = 8;
+  KillSwitchTriState no_diff = 9;
+  int64 reconciled_at_ms = 10; // 0 is a REAL value: the arm-freeze signature written by reset_reconcile_targets_in_tx
+  uint32 schema_version = 1000;
+}
+
+// Same-transaction engine verdict source (evaluate_expected_convergence is
+// the single authority); consumers render, never re-derive.
+message KillSwitchScopeConvergence {
+  repeated string expected_credential_ids = 1;
+  repeated string reported_credential_ids = 2;
+  repeated string unreported_credential_ids = 3; // expected members with no row this revision (blocks convergence)
+  repeated string quarantined_expected_ids = 4; // expected members whose provenance is unprovable (zero votes)
+  repeated string quarantined_outsider_ids = 5; // non-expected rows: neither vote nor block
+  bool clean = 6;
+  bool flatten_complete = 7;
+  int64 expected_total = 8;
+  int64 dirty_count = 9;
+  int64 incomplete_count = 10;
+  uint32 schema_version = 1000;
+}
+
+message KillSwitchAuthorityRow {
+  string scope_key = 1;
+  bool found = 2; // deterministic fact of this read transaction; a transport failure is an RPC error, never found=false
+  string level = 3; // canonical token; empty when !found or !level_canonical
+  string raw_level = 4; // verbatim undecodable value, diagnosis only
+  bool level_canonical = 5;
+  string trigger_source = 6; // latest action fact (who wrote the current level)
+  int32 authority_kind = 7; // 0 none/unknown, 1 platform, 2 auto, 3 member (current reset eligibility)
+  int32 authority_member_id = 8; // >0 when authority_kind == 3
+  int64 flatten_generation = 9;
+  string flatten_state = 10;
+  KillSwitchTriState last_reconcile_clean = 11; // DB NULL -> KSTRI_UNKNOWN
+  optional int64 last_reconcile_at_ms = 12; // absent = never projected, NOT zero
+  int64 armed_at_ms = 13;
+  int64 observed_at_ms = 14;
+  repeated KillSwitchConvergenceRow convergence = 15;
+  KillSwitchScopeConvergence scope_convergence = 16;
+  uint32 schema_version = 1000;
+}
+
+// Execution-attribution hit for request_ref queries. kind is "arm" or
+// "reset" derived from WHICH immutable column matched; an arm hit is never
+// reset success. reset_committed requires reset_at_ms set AND
+// reset_request_ref written on the committed event row.
+message KillSwitchRequestRefHit {
+  string request_ref = 1;
+  string scope_key = 2;
+  int64 flatten_generation = 3; // the authorized revision this action bound
+  string kind = 4; // "arm" | "reset"
+  string trigger_source = 5;
+  int64 at_ms = 6;
+  int32 arm_actor_kind = 7; // immutable original arm identity
+  int32 arm_actor_member_id = 8;
+  bool reset_committed = 9;
+  int32 current_authority_kind = 10; // mutable current ownership, for contrast only
+  int32 current_authority_member_id = 11;
+  uint32 schema_version = 1000;
+}
+
+message GetKillSwitchStatesRequest {
+  repeated string scope_keys = 1; // closed world; any invalid entry rejects the whole call
+  repeated string request_refs = 2; // optional closed-world ULID lookup; empty = skip
+  uint32 schema_version = 1000;
+}
+
+message GetKillSwitchStatesResponse {
+  repeated KillSwitchAuthorityRow rows = 1; // same order and count as scope_keys
+  repeated KillSwitchRequestRefHit request_ref_hits = 2;
+  bool snapshot_stale = 3; // generation moved inside the read transaction; treat rows as stale
+  // Platform-chain-only engine facts (FA2 §1.1): the member projection strips
+  // both before any member-facing response (D8a).
+  string engine_boot_id = 4; // always filled on success
+  int64 admission_version = 5; // always filled on success
+  uint32 schema_version = 1000;
+}
+
+message AdmitMemberResetRequest {
+  string basis = 1; // required, 1..200, prefix clean_attestation: | post_rollback_repair:
+  string admitted_by = 2; // required operator identity, 1..128
+  bool demote_unknown_member_authority = 3; // true iff basis prefix is post_rollback_repair:
+  string expected_boot_id = 4; // required canonical ULID read at verification time; never rebound to latest
+  optional int64 expected_admission_version = 5; // required presence; 0 is a legal initial value, absence is not
+  uint32 schema_version = 1000;
+}
+
+message AdmitMemberResetResponse {
+  bool admitted = 1;
+  string admitted_boot_id = 2; // server-stamped CURRENT boot id; never a client value
+  int64 admission_version = 3; // version AFTER the admission bump
+  int64 demoted_scopes = 4; // post_rollback_repair branch only; else 0
+  string message = 5;
+  uint32 schema_version = 1000;
+}
+
+message PositionState {
+  string position_id = 1;
+  string credential_id = 2;
+  string bot_uid = 3;
+  string symbol_key = 4;
+  string direction = 5;
+  int64 entry_epoch = 6;
+  string state = 7;
+  string active_key = 8;
+  string pending_intent_id = 9;
+  string pending_idem_key = 10;
+  string qty = 11; // Decimal string.
+  string entry_price = 12; // Decimal string; empty when unknown.
+  int64 opened_at_ms = 13;
+  int64 closed_at_ms = 14;
+  int64 last_reconciled_ms = 15;
+  int64 updated_at_ms = 16;
+  string pending_client_order_id_short = 17;
+  uint32 schema_version = 1000;
+}
+
+message EngineOrder {
+  string engine_order_id = 1;
+  string credential_id = 2;
+  string bot_uid = 3;
+  string run_id = 4;
+  string cycle_id = 5;
+  string idempotency_key = 6;
+  string client_order_id_short = 7;
+  string exchange_order_id = 8;
+  string exchange = 9;
+  string market_kind = 10;
+  string symbol_key = 11;
+  string status = 12;
+  int64 created_at_ms = 13;
+  int64 updated_at_ms = 14;
+  string intent_id = 15; // int_<ULID>, aligned with TradingIntent.
+  string risk_verdict_id = 16; // rv_<ULID>, aligned with RiskVerdict.
+  uint32 schema_version = 1000;
+}
+
+// B2 read-only order/protection projection. UNKNOWN is never a measured zero.
+enum AccountOrderAvailability {
+  AOA_UNKNOWN = 0;
+  AOA_AVAILABLE = 1;
+  AOA_UNAVAILABLE = 2;
+}
+enum AccountOrderCoverage {
+  AOC_UNKNOWN = 0;
+  AOC_COMPLETE_LOCAL = 1;
+  AOC_COMPLETE_VENUE = 2;
+  AOC_PARTIAL = 3;
+  AOC_NOT_APPLICABLE = 4;
+}
+message GetAccountOrderStateRequest {
+  string credential_id = 1;
+  uint32 max_items_per_section = 2; // 0 defaults to 500; maximum 1000.
+  optional string expected_boot_id = 3;
+  uint32 schema_version = 1000;
+}
+message AccountOrderSectionMeta {
+  AccountOrderCoverage coverage = 1;
+  bool overflow = 2;
+  uint32 returned_count = 3;
+  optional uint32 total_count = 4; // Absent when a local read overflowed.
+  string source_kind = 5;
+  uint32 schema_version = 1000;
+}
+message LocalAccountOrder {
+  string engine_order_id = 1;
+  string credential_id = 2;
+  string bot_uid = 3;
+  optional string position_id = 4;
+  optional string order_role = 5;
+  string symbol_key = 6;
+  string action = 7;
+  string side = 8;
+  string order_type = 9;
+  string quantity = 10;
+  optional string price = 11;
+  optional bool reduce_only = 12;
+  string raw_status = 13;
+  string classified_state = 14;
+  optional string client_order_id = 15;
+  optional string exchange_order_id = 16;
+  int64 created_at_ms = 17;
+  int64 updated_at_ms = 18;
+  uint32 schema_version = 1000;
+}
+message LocalProtectionPosition {
+  string position_id = 1;
+  string credential_id = 2;
+  string bot_uid = 3;
+  string symbol_key = 4;
+  string direction = 5;
+  string quantity = 6;
+  string raw_state = 7;
+  int64 updated_at_ms = 8;
+  // Positive proof for a closed simulation lifecycle, not venue protection.
+  // Matches cleanup scope/revision/reason and rechecks absence of venue ACKs.
+  optional bool paper_cleanup_complete = 9;
+  uint32 schema_version = 1000;
+}
+message LocalProtectionPlan {
+  string position_id = 1;
+  string credential_id = 2;
+  string bot_uid = 3;
+  string symbol_key = 4;
+  string direction = 5;
+  optional bool required = 6;
+  int64 generation = 7;
+  string stop_loss_price = 8;
+  optional string take_profit_price = 9;
+  int64 updated_at_ms = 10;
+  string association_status = 11;
+  uint32 schema_version = 1000;
+}
+message LocalProtectionOrder {
+  string protection_order_id = 1;
+  string credential_id = 2;
+  string position_id = 3;
+  string kind = 4;
+  int64 generation = 5;
+  optional string engine_order_id = 6;
+  optional string exchange_algo_id = 7;
+  optional string client_algo_id = 8;
+  optional string actual_order_id = 9;
+  optional string legacy_exchange_order_id = 10;
+  optional string algo_status = 11;
+  string trigger_price = 12;
+  optional bool reduce_only = 13;
+  optional bool close_position = 14;
+  string raw_status = 15;
+  optional bool verified_projection = 16;
+  optional int64 last_verified_at_ms = 17;
+  optional int64 algo_updated_at_ms = 18;
+  int64 updated_at_ms = 19;
+  string association_status = 20;
+  optional bool current_plan_generation_match = 21;
+  uint32 schema_version = 1000;
+}
+message LocalAccountOrderSection {
+  AccountOrderSectionMeta meta = 1;
+  repeated LocalAccountOrder rows = 2;
+  uint32 schema_version = 1000;
+}
+message LocalProtectionPositionSection {
+  AccountOrderSectionMeta meta = 1;
+  repeated LocalProtectionPosition rows = 2;
+  uint32 schema_version = 1000;
+}
+message LocalProtectionPlanSection {
+  AccountOrderSectionMeta meta = 1;
+  repeated LocalProtectionPlan rows = 2;
+  uint32 schema_version = 1000;
+}
+message LocalProtectionOrderSection {
+  AccountOrderSectionMeta meta = 1;
+  repeated LocalProtectionOrder rows = 2;
+  uint32 schema_version = 1000;
+}
+message LocalAccountOrderProjection {
+  LocalAccountOrderSection orders = 1;
+  LocalProtectionPositionSection positions = 2;
+  LocalProtectionPlanSection protection_plans = 3;
+  LocalProtectionOrderSection protection_orders = 4;
+  uint32 schema_version = 1000;
+}
+message VenueAccountOrder {
+  optional string order_id = 1;
+  optional string client_order_id = 2;
+  optional string algo_id = 3;
+  optional string client_algo_id = 4;
+  optional string actual_order_id = 5;
+  optional string symbol = 6;
+  optional string status = 7;
+  optional string side = 8;
+  optional string order_type = 9;
+  optional string quantity = 10;
+  optional string price = 11;
+  optional int64 updated_at_ms = 12;
+  bool identity_valid = 13;
+  optional string trigger_price = 14;
+  optional bool reduce_only = 15;
+  optional bool close_position = 16;
+  optional string position_side = 17;
+  uint32 schema_version = 1000;
+}
+message VenueAccountOrderSection {
+  AccountOrderSectionMeta meta = 1;
+  repeated VenueAccountOrder rows = 2;
+  optional int64 started_at_ms = 3;
+  optional int64 completed_at_ms = 4;
+  uint32 schema_version = 1000;
+}
+message AccountOrderReconcileTruth {
+  bool has_diff = 1;
+  bool all_positions_zero = 2;
+  bool all_open_orders_empty = 3;
+  bool all_open_algo_orders_empty = 4;
+  bool local_position_zero_diff = 5;
+  uint32 schema_version = 1000;
+}
+message AccountOrderReadAttempt {
+  string observation_id = 1;
+  string status = 2; // in_progress|succeeded|failed|not_observed
+  string coverage = 3; // full_account|symbols|stream_only
+  int64 started_at_ms = 4;
+  optional int64 completed_at_ms = 5;
+  uint32 schema_version = 1000;
+}
+message VenueAccountOrderObservation {
+  AccountOrderAvailability availability = 1;
+  string reason_code = 2;
+  string source_kind = 3;
+  optional string observation_id = 4;
+  string credential_id = 5;
+  string engine_boot_id = 6;
+  optional int64 capture_started_at_ms = 7;
+  optional int64 capture_completed_at_ms = 8;
+  optional int64 source_as_of_ms = 9;
+  VenueAccountOrderSection ordinary = 10;
+  VenueAccountOrderSection algo = 11;
+  AccountOrderReconcileTruth reconcile_truth = 12;
+  AccountOrderReadAttempt latest_attempt = 13;
+  uint32 schema_version = 1000;
+}
+message GetAccountOrderStateResponse {
+  string credential_id = 1;
+  string engine_boot_id = 2;
+  string account_kind = 3; // simulation|exchange
+  int64 observed_at_ms = 4;
+  LocalAccountOrderProjection local = 5;
+  VenueAccountOrderObservation venue = 6;
+  uint32 schema_version = 1000;
+}
+
+// B3-K1 revisions are uint64 on the wire and decimal STRINGS in JSON.
+message GetPositionCloseTargetRequest {
+  string credential_id = 1;
+  string position_id = 2;
+  uint32 schema_version = 1000;
+}
+message PositionCloseTarget {
+  string position_id = 1;
+  uint64 revision = 2;
+  string bot_uid = 3;
+  string symbol_key = 4;
+  string direction = 5;
+  string quantity = 6;
+  uint64 entry_epoch = 7;
+  uint64 exit_epoch = 8;
+  string run_mode = 9;
+  string execution_venue = 10;
+  string entry_engine_order_id = 11;
+  uint32 schema_version = 1000;
+}
+message GetPositionCloseTargetResponse {
+  bool available = 1;
+  string reason_code = 2;
+  int64 observed_at_ms = 3;
+  string engine_boot_id = 4;
+  PositionCloseTarget target = 5;
+  uint32 schema_version = 1000;
+}
+message ClosePositionRequest {
+  string credential_id = 1;
+  string position_id = 2;
+  uint64 expected_revision = 3;
+  string expected_boot_id = 4;
+  string request_ref = 5;
+  uint64 actor_member_id = 6; // Positive JS-safe integer; server rejects others.
+  uint32 schema_version = 1000;
+}
+message GetPositionCloseReceiptRequest {
+  string credential_id = 1;
+  string request_ref = 2;
+  uint64 actor_member_id = 3;
+  uint32 schema_version = 1000;
+}
+message PositionCloseObservation {
+  string status = 1; // observed|unknown
+  string position_id = 2;
+  uint64 revision = 3;
+  optional string quantity = 4;
+  optional string state = 5;
+  optional int64 observed_at_ms = 6;
+  string source = 7; // paper_transaction|exchange_truth|position_store
+  uint32 schema_version = 1000;
+}
+message PositionCloseProtectionObservation {
+  // unknown|in_place|cleanup_pending|cleaned (paper stays unknown)
+  string status = 1;
+  // PROTECTION_CLEANUP_NOT_PROVEN|STOP_LOSS_NOT_CONFIRMED|STOP_LOSS_ON_VENUE|
+  // PROTECTION_CLEANUP_PENDING|PROTECTION_CLEANUP_CONFIRMED
+  string reason_code = 2;
+  uint32 schema_version = 1000;
+}
+message ClosePositionResponse {
+  bool found = 1;
+  string request_ref = 2;
+  string position_id = 3;
+  uint64 target_revision = 4;
+  // prepared|accepted|working|partially_filled|filled|rejected|unknown|pending_unknown
+  // (paper: prepared|accepted|rejected|pending_unknown; accepted+PAPER_FILLED is terminal)
+  string request_status = 5;
+  string reason_code = 6;
+  optional string engine_order_id = 7;
+  optional string risk_verdict_id = 8;
+  PositionCloseObservation execution_outcome = 9; // Frozen transaction result.
+  PositionCloseObservation position_observation = 10; // Independent current row.
+  PositionCloseProtectionObservation protection_observation = 11;
+  // WO-M1 exchange close only (unset for paper): cumulative venue fills of the
+  // close order and the exact target quantity, both decimal strings.
+  optional string filled_quantity = 12;
+  optional string target_quantity = 13;
+  uint32 schema_version = 1000;
+}
+
+// All lifecycle messages require schema_version=1. Identity strings are exact;
+// aliases, whitespace and case normalization are rejected.
+message ArmLifecycleFenceRequest {
+  string request_ref = 1; // Canonical ULID; immutable across retries.
+  uint64 actor_member_id = 2; // 1..9007199254740991; upstream authenticated owner.
+  string account_uid = 3; // 1..32 ASCII [A-Za-z0-9_-].
+  string credential_id = 4; // Positive canonical safe integer or paper:<32 lower hex>.
+  string purpose = 5; // disable|rotate|account_closure; never an execution result.
+  string expected_boot_id = 6; // Required canonical ULID from current observation.
+  uint32 schema_version = 1000;
+}
+message GetLifecycleFenceRequest {
+  string request_ref = 1;
+  uint64 actor_member_id = 2;
+  string account_uid = 3;
+  string credential_id = 4;
+  string purpose = 5;
+  uint32 schema_version = 1000;
+}
+message LifecycleFenceIdentity {
+  string request_ref = 1;
+  uint64 actor_member_id = 2;
+  string account_uid = 3;
+  string credential_id = 4;
+  string purpose = 5;
+  uint32 schema_version = 1000;
+}
+message LifecycleFenceArmFact {
+  string expected_boot_id = 1;
+  string armed_boot_id = 2;
+  uint64 fence_revision = 3;
+  int64 armed_at_ms = 4;
+  uint32 schema_version = 1000;
+}
+message LifecycleFenceObservation {
+  string credential_id = 1;
+  string engine_boot_id = 2;
+  int64 observed_at_ms = 3;
+  // Exactly credential_on_current_executor. Not a cross-process owner proof.
+  string scope = 4;
+  bool admission_blocked = 5;
+  uint64 fence_revision = 6; // 0 when no fence exists; arming is monotonic.
+  string entry_cancellation = 7; // Exactly not_started; no cancel is performed.
+  string settlement = 8; // Exactly unknown; no settlement claim.
+  uint32 schema_version = 1000;
+}
+message LifecycleFenceResponse {
+  // Always present, including found=false. Binds this read to the entire tuple.
+  LifecycleFenceIdentity identity = 1;
+  bool found = 2;
+  // Immutable original fact; only present when the exact original request exists.
+  LifecycleFenceArmFact original_arm = 3;
+  // Always present. A new observation never rewrites the original arm/boot/time.
+  LifecycleFenceObservation current_observation = 4;
+  uint32 schema_version = 1000;
+}

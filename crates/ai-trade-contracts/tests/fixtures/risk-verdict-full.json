@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "risk_verdict_id": "rv_01J00000000000000000000001",
+  "intent_id": "int_01J00000000000000000000001",
+  "created_at_ms": 1786291210000,
+  "policy_version": "risk_policy_v3",
+  "policy_hash": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+  "decision": "resize",
+  "reject_reason_code": null,
+  "sizing": {
+    "equity_usdt": "10432.18",
+    "risk_per_trade_pct": 0.005,
+    "risk_budget_usdt": "52.16",
+    "entry_ref_price": "63241.50",
+    "stop_loss_price": "61000.00",
+    "stop_distance_pct": 0.03544,
+    "leverage": 3,
+    "computed_qty": "0.02328",
+    "capped_by": ["max_position_notional"],
+    "final_qty": "0.01581",
+    "final_notional_usdt": "1000.00"
+  },
+  "rules": [
+    {
+      "rule": "data_quality_gate",
+      "result": "pass"
+    },
+    {
+      "rule": "max_position_notional",
+      "result": "capped",
+      "detail": "2311.74 -> 1000.00"
+    }
+  ],
+  "budget_as_of_ms": 1786291202000,
+  "evaluator_version": "risk-policy@1.0.0"
+}

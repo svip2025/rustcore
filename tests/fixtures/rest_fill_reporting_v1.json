@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "credential_id": "rest-fill-wire",
+  "symbol": "BTCUSDT",
+  "symbol_key": "binance|futures|BTC|USDT|USDT",
+  "bot_uid": "bot_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "cycle_id": "cyc_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "cases": [
+    {"action": "close_long", "side": "long", "exchange_side": "SELL", "order_role": "exit", "order_id": 8101, "trade_id": 9101},
+    {"action": "close_short", "side": "short", "exchange_side": "BUY", "order_role": "exit", "order_id": 8102, "trade_id": 9102},
+    {"action": "open_short", "side": "short", "exchange_side": "SELL", "order_role": "entry", "order_id": 8103, "trade_id": 9103},
+    {"action": "open_long", "side": "long", "exchange_side": "BUY", "order_role": "entry", "order_id": 8104, "trade_id": 9104},
+    {"external": true, "exchange_side": "SELL", "order_id": 8105, "trade_id": 9105}
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "proposal_id": "lp_de5fa7148e524cc2d840622f0728e5a4",
+  "proposal_hash": "de5fa7148e524cc2d840622f0728e5a4a2b136744681e5c418ce95650fde2cf5",
+  "proposal_version": "v1",
+  "evidence_scope": {
+    "range_start_ms": 1786550400000,
+    "range_end_ms": 1786636800000,
+    "episode_set_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "episode_count": 120
+  },
+  "affected_component": "regime_router",
+  "observed_pattern": "Range abstention quality is lower than the baseline.",
+  "hypothesis": "A stricter range threshold improves abstention quality.",
+  "proposed_change": "Increase the range abstention threshold for evaluation.",
+  "expected_benefit": "Fewer low-quality entries in range regimes.",
+  "known_risks": ["The challenger may miss early trend transitions."],
+  "author": {
+    "model": "review-model",
+    "version": "2026-08-14"
+  },
+  "confidence_status": "available",
+  "confidence": 0.72,
+  "deployment_authorization": false,
+  "created_at_ms": 1786636800100
+}

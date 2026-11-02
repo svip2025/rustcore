@@ -1,0 +1,101 @@
+-- 段③ 批 0 · H-01（High，engine safety contract「对账失败后继续交易」）与 M-04（Medium）
+-- 的共同根因：`engine_credential_health` 只有**一个**降级槽位
+-- （`degraded` 标志 + `degraded_reason` 原因串），两类互不相干的事实抢它。
+--
+-- 抢槽位的两方：
+--
+--  * **熔断器**（`svc::record_credential_error` / `clear_credential_errors`）——
+--    "这个凭据的交易所调用在窗口内连续失败了 N 次"。
+--  * **对账**（`reconcile::apply_reconcile_diff_degrade`）——
+--    "本轮对账发现了差异，且差异尚未消解"。
+--
+-- 槽位复用本身还不致命，致命的是**置位按标志、解除按原因**这个不对称：
+--
+--  * 置位守卫是 `WHEN degraded = 0`（按**标志**）：交易所错误先把标志打成 1，
+--    对账差异到来时守卫不命中——差异**一个字都没写进健康行**。
+--  * `clear_credential_errors` 的保护守卫判 `degraded_reason = 'reconcile_diff'`
+--    （按**原因**）：判的正是那个没被写进去的值，保护不命中，走 `ELSE 0`。
+--    降级期间一张被允许的平仓/保护单 ACK 成功，就把开仓闸门开了（H-01）。
+--  * 反方向同样成立：对账降级先占住标志，`record_credential_error` 的
+--    `WHEN degraded <> 0 THEN degraded` 就**永不**写 `degraded`——熔断器本该
+--    跳闸却没跳；随后按 reason 的 auto-clear 只看 `degraded_reason`、不看计数，
+--    把标志抹成 0（M-04）。
+--
+-- 这一列就是那个被抢走的槽位，还给对账：
+--
+--  * `1` —— 本轮对账观察到差异，且此后**没有**任何一轮对账观察到它消解。
+--    开仓闸门（`risk.rs`）读 `degraded <> 0 OR reconcile_diff_open <> 0`。
+--  * `0` —— 有一轮对账真的跑完并观察到零差异。这是一条**被产出的**真值，
+--    不是"没人写过"。
+--  * `NULL` —— 0029 之前写下的存量行：本列语义下**从未被写过**。
+--
+-- 置位/解除从此**只**写这一列，与 `degraded` / `degraded_reason` 完全解耦：
+-- `degraded` 此后只有一个写者（熔断器）和一个清除者（ACK 清零），
+-- `reconcile_diff_open` 此后只有一个写者（对账）。两条事实不再互相掩盖。
+--
+-- ## 存量数据终态论证（零 DML）
+--
+-- 这里**零 DML**：不改任何存量行，存量取 `NULL`。
+--
+-- H-01 的本质决定了「历史上被掩盖的差异」**不可从库里恢复**——被掩盖的那次
+-- 差异按定义就是"一个字都没写进健康行"，`engine_order_events` 里那条
+-- `reconcile_diff` 事件也只记录了**当时**的差异清单，不记录它后来是否消解
+-- （消解只表现为下一轮的一次 UPDATE，而那次 UPDATE 在旧实现里被 reason 守卫
+-- 挡掉的场景恰恰就是本缺陷）。所以对存量行，诚实的值只能是"不知道"。
+--
+-- engine safety contract：缺失不得被转换成 0、空串或"正常"。因此 `NULL` **不是**
+-- healthy，两侧都按 fail-closed 读：
+--
+--  * 闸门与 `is_credential_degraded` 读 `COALESCE(reconcile_diff_open, 1)`
+--    ——"证不出没有差异"与"有差异"在开仓这个判据上等价（宁可多拦一次开仓）。
+--  * 启动期 `reconcile::revalidate_legacy_credential_reconcile_diff` 在迁移
+--    之后、任何对账任务启动之前逐行给出结论并留证据到
+--    `engine_credential_reconcile_diff_revalidations`，把 `NULL` 收敛成显式值，
+--    让这条状态**可读可审计**，而不是靠每个读者记得写 COALESCE。
+--
+-- 复核的两种结论（两者都写 1，但**理由不同**，运维要能区分）：
+--
+--  * `diff_open_proven` —— `degraded <> 0 AND degraded_reason = 'reconcile_diff'`：
+--    差异被记录过且此后没被解除。这行**今天就在拦**开仓，置 1 无行为变化。
+--  * `unprovable` —— 其余存量行。当前状态排除不了"被掩盖的差异"：
+--    被掩盖后又被 ACK 清零的行，其 `degraded=0 / reason=NULL /
+--    consecutive_errors=0 / first=last=0` 与"从未出过错"逐字不可区分。
+--    fail-closed 置 1。
+--
+-- **爆炸半径是有界的**：`engine_credential_health` 的行**只**由实盘交易所路径
+-- 创建（`record_credential_error` 在提交失败时、`clear_credential_errors` 在
+-- 交易所 ACK 时）。没有行的凭据（paper、从未实盘下过单的凭据）不受影响——
+-- 没有行就没有过 `degraded=1`，也就不可能发生掩盖。
+--
+-- **收敛路径**：置 1 的行由**下一轮对账**用真值收敛成 0（`ReconcilerManager`
+-- 的启动对账在任务起来时立刻跑一次，不等 `RECONCILE_INTERVAL_MS`）。降级只拦
+-- **开仓**（`credential_degrade_guard_disposition`）——close / reduce-only /
+-- 保护单 / 应急单一律放行，而实盘意图进入 `ExecuteIntents` 时就会
+-- `ensure_running` 对账任务，因此收敛不依赖"先成功开一次仓"这个死结。
+-- 运维另有 `ReconcileNow` RPC 可以立刻触发。
+-- ## 类型选择
+--
+-- `BIGINT` 而不是 `INTEGER`：本表的 `consecutive_errors` / `first_error_ms` /
+-- `last_error_ms` 已经是 `BIGINT`，而 `store.rs` 的 `DDL_REENTRY_PLANS` 结构
+-- 探针要在**两个后端上比对同一个类型名**——MySQL 的 `information_schema`
+-- 把 `INTEGER` 报成 `int`，SQLite 的 `pragma_table_info` 原样报 `integer`，
+-- 同一份期望在两个后端上对不上。`BIGINT` 两边都报 `bigint`。
+--
+-- ## 半执行 re-entry（红线）
+--
+-- 这是一次**两段 DDL**（`ALTER` + `CREATE TABLE`），与 0027 / 0028 逐字同形：
+-- MySQL 的 DDL 是隐式提交，账本落章前崩溃会让下一次启动撞
+-- `MigrateError::Dirty(29)` 并**永久停机**。因此 0029 必须登记进
+-- `store.rs` 的 `DDL_REENTRY_PLANS`（两段各带期望结构与补跑语句），
+-- 由 `the_registered_effects_match_a_fresh_mysql_install` 在真实 MySQL 上
+-- 与全新安装的 schema 逐列对账。改本文件的任何一段 DDL 都必须同步改那里。
+ALTER TABLE engine_credential_health
+  ADD COLUMN reconcile_diff_open BIGINT;
+
+CREATE TABLE engine_credential_reconcile_diff_revalidations (
+  credential_id VARCHAR(64) NOT NULL,
+  verdict VARCHAR(32) NOT NULL,
+  evidence TEXT NOT NULL,
+  revalidated_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (credential_id)
+);

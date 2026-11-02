@@ -1,0 +1,162 @@
+syntax = "proto3";
+
+package execution_engine.vnext;
+
+// NOTE:
+// - Rust Core -> Python Orchestrator event stream is at-least-once.
+// - Python must dedupe by (seq,event_id) and resume by since_seq.
+
+service EngineExecution {
+  rpc ExecuteIntents(ExecuteIntentsRequest) returns (ExecuteIntentsResponse);
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
+  rpc GetOpenOrders(GetOpenOrdersRequest) returns (GetOpenOrdersResponse);
+  rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
+  rpc ReconcileNow(ReconcileNowRequest) returns (ReconcileNowResponse);
+  rpc EnsureMarketData(EnsureMarketDataRequest) returns (EnsureMarketDataResponse);
+}
+
+service EngineEvents {
+  rpc StreamEvents(StreamEventsRequest) returns (stream EngineEvent);
+}
+
+message ExecuteIntentsRequest {
+  string credential_id = 1;
+  string run_mode = 2; // paper|live
+  repeated OrderIntent intents = 3;
+}
+
+message ExecuteIntentsResponse {
+  repeated IntentAck acks = 1;
+}
+
+message IntentAck {
+  string idempotency_key = 1;
+  string engine_order_id = 2;
+  string status = 3; // accepted|duplicate|rejected|error
+  string message = 4;
+}
+
+message OrderIntent {
+  string bot_uid = 1;
+  string run_id = 2;
+  string cycle_id = 3;
+  string idempotency_key = 4;       // idem_<sha256Hex>
+  string client_order_id_short = 5; // coid_<...>
+  string exchange = 6;
+  string market_kind = 7;           // spot|futures
+  string symbol_key = 8;            // canonical: exchange|marketKind|BASE|QUOTE|settle?
+  string action = 9;                // open_long/open_short/close_long/close_short
+  string side = 10;                 // long|short (or buy|sell for spot)
+  string order_type = 11;           // market|limit|stop_market|take_profit_market
+  string price = 12;                // optional decimal string
+  string quantity = 13;             // decimal string
+  bool reduce_only = 14;
+
+  // Risk gate hints (enforced in Rust Core if > 0).
+  // Notional unit is quote currency (e.g. USDT for Binance futures USDT perp).
+  double max_position_notional = 20;
+  double max_credential_notional = 21;
+}
+
+message StreamEventsRequest {
+  string credential_id = 1;
+  uint64 since_seq = 2; // replay events where seq > since_seq
+}
+
+message EngineEvent {
+  string credential_id = 1;
+  uint64 seq = 2;       // monotonic cursor per credential stream
+  string event_id = 3;  // stable dedupe key (unique within stream)
+  int64 ts_ms = 4;
+  string event_type = 5; // order_ack|fill|cancel|reject|position_update|reconcile_diff|error|bar_closed
+
+  // Correlation
+  string bot_uid = 10;
+  string run_id = 11;
+  string cycle_id = 12;
+  string idempotency_key = 13;
+  string client_order_id_short = 14;
+  string exchange_order_id = 15;
+  string exchange = 16;
+  string market_kind = 17;
+  string symbol_key = 18;
+
+  // Payload (typed in real proto; JSON for v1)
+  bytes payload_json = 30;
+}
+
+message GetOrderRequest {
+  string credential_id = 1;
+  string engine_order_id = 2;
+}
+
+message GetOrderResponse {
+  bool found = 1;
+  EngineOrder order = 2;
+}
+
+message GetOpenOrdersRequest {
+  string credential_id = 1;
+  string symbol_key = 2; // optional: filter by symbol_key
+  string cycle_id = 3;   // optional: filter by cycle_id
+}
+
+message GetOpenOrdersResponse {
+  repeated EngineOrder orders = 1;
+}
+
+message CancelOrderRequest {
+  string credential_id = 1;
+  string engine_order_id = 2;
+  string reason = 3;
+}
+
+message CancelOrderResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message ReconcileNowRequest {
+  string credential_id = 1;
+  string reason = 2;
+}
+
+message ReconcileNowResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message EnsureMarketDataRequest {
+  string credential_id = 1;
+  repeated MarketDataSubscription subscriptions = 2;
+}
+
+message MarketDataSubscription {
+  string exchange = 1;
+  string market_kind = 2;
+  string symbol_key = 3;
+  string timeframe = 4; // 1m|5m|15m...
+}
+
+message EnsureMarketDataResponse {
+  bool accepted = 1;
+  string message = 2;
+  uint32 started = 3;
+}
+
+message EngineOrder {
+  string engine_order_id = 1;
+  string credential_id = 2;
+  string bot_uid = 3;
+  string run_id = 4;
+  string cycle_id = 5;
+  string idempotency_key = 6;
+  string client_order_id_short = 7;
+  string exchange_order_id = 8;
+  string exchange = 9;
+  string market_kind = 10;
+  string symbol_key = 11;
+  string status = 12;
+  int64 created_at_ms = 13;
+  int64 updated_at_ms = 14;
+}
