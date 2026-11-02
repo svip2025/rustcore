@@ -58,7 +58,9 @@ cargo run --locked
 
 The server binds to `127.0.0.1:50051`, uses `sqlite://./data/rustcore.db`, and automatically creates its database and applies migrations. With no live authorization or exchange credentials, execution is paper-only. Public exchange connections default to testnet. See [.env.example](.env.example) for placeholder settings; the process reads environment variables, so export values explicitly when using a file.
 
-Mainnet requires an explicit `ENGINE_LIVE_ENABLED=1` opt-in and produces a prominent startup warning. That switch alone does not authorize an order: stage limits, matching nonexpired promotion certification, credentials, and normal admission checks still apply. Before live orders, the caller must publish an unexpired stage certification confirming that the strategy has passed its paper/testnet stage. No mainnet configuration example is supplied.
+`ExecuteIntents.run_mode` supports `paper`, `demo`, `live_small`, and `live`. For exchange testnet execution, use `demo`, set `ENGINE_STAGE_MAX=demo`, and explicitly select the credential's testnet venue. `ENGINE_LIVE_ENABLED=0` is supported for this path, and testnet demo does not require `PutPromotionCertification`.
+
+Mainnet requires an explicit `ENGINE_LIVE_ENABLED=1` opt-in and produces a prominent startup warning. That switch alone does not authorize an order: stage limits, credentials, and normal admission checks still apply. When promotion certification is required, it must belong to the bot, be passed and not invalidated, cover the requested stage, and match the intent's `config_hash`, `prompt_hash`, `policy_version`, and `code_commit`; the policy version must also match the active policy. The current contract enforces no certification expiry timestamp or age-based TTL. No mainnet configuration example is supplied.
 
 For a MySQL-backed engine, set `RUSTCORE_DB_URL` to your own engine database URL. `RUSTCORE_TEST_MYSQL_URL` is a separate scratch-database setting and is not the engine runtime database.
 
@@ -107,9 +109,13 @@ The server registers both contracts. Generate clients from the checked-in proto 
 | [vNext execution](proto/execution_engine_vnext.proto) | `ExecuteIntents`, `GetOrder`, `GetOpenOrders`, `CancelOrder`, `ReconcileNow`, `EnsureMarketData` |
 | vNext events | `EngineEvents.StreamEvents` with sequence-based replay and tailing |
 
-The v2 `GetOrder`, `GetOpenOrders`, `CancelOrder`, `EnsureMarketData`, and `EngineEvents.StreamEvents` currently return `UNIMPLEMENTED`; use their vNext counterparts where needed. Exact position close has explicit availability and ownership checks; an unavailable target must not be treated as permission to close another position.
+The v2 `GetOrder`, `GetOpenOrders`, `CancelOrder`, `EnsureMarketData`, and `EngineEvents.StreamEvents` currently return `UNIMPLEMENTED`; use their vNext counterparts where needed. Exact position close supports paper and exchange-backed positions, including testnet demo, with explicit availability and ownership checks; an unavailable target must not be treated as permission to close another position.
+
+`Protection.confirm_timeout_ms` is persisted with the protection plan; the exchange confirmation timer uses the `PROTECTION_CONFIRM_TIMEOUT_MS` environment variable (default 5000 ms, clamped to 1–60000 ms), so changing the RPC field does not change that timer.
 
 `GetAccountState` requires `credential_id`. Its optional `bot_uid` filters positions, while account totals remain credential-wide. Missing balance truth returns `available=false` without invented monetary values. `as_of_ms` is the older balance/position timestamp, and missing liquidation prices remain absent. The response identifies derived fields such as equity and used margin; these are not direct exchange fields. This read path does not grant order or flatten admission.
+
+`GetAccountOrderState` has a narrower credential identity contract: an exchange-backed `credential_id` must contain 1–10 decimal digits with no leading zero. Other RPCs accept broader identifiers; choose an identifier compatible with every RPC the caller uses.
 
 ## Caller responsibilities
 

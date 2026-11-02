@@ -15,8 +15,9 @@ service EngineExecution {
   // This does not cancel orders, settle obligations, disable a key, or close an account.
   rpc ArmLifecycleFence(ArmLifecycleFenceRequest) returns (LifecycleFenceResponse);
   rpc GetLifecycleFence(GetLifecycleFenceRequest) returns (LifecycleFenceResponse);
-  // B3-K1: exact, revision-bound paper close. Member authorization and the
-  // close_holding password challenge remain the upstream caller's obligation.
+  // Exact, revision-bound close for paper and exchange-backed positions.
+  // Member authorization and the close_holding password challenge remain
+  // the upstream caller's obligation.
   rpc GetPositionCloseTarget(GetPositionCloseTargetRequest) returns (GetPositionCloseTargetResponse);
   rpc ClosePosition(ClosePositionRequest) returns (ClosePositionResponse);
   rpc GetPositionCloseReceipt(GetPositionCloseReceiptRequest) returns (ClosePositionResponse);
@@ -52,7 +53,7 @@ service EngineEvents {
 
 message ExecuteIntentsRequest {
   string credential_id = 1;
-  string run_mode = 2; // paper|live
+  string run_mode = 2; // paper|demo|live_small|live
   repeated OrderIntent intents = 3;
   // One immutable snapshot decision applies to this execution batch. The
   // complete DataSnapshot is already durably stored in data_snapshots; the
@@ -109,7 +110,7 @@ message Protection {
   bool required = 1;
   string stop_loss_price = 2; // Decimal string.
   string take_profit_price = 3; // Decimal string.
-  uint32 confirm_timeout_ms = 4; // Confirmation timeout causes flatten.
+  uint32 confirm_timeout_ms = 4; // Persisted only; exchange confirmation timer uses PROTECTION_CONFIRM_TIMEOUT_MS.
   uint32 schema_version = 1000;
 }
 
@@ -515,6 +516,8 @@ message PutRiskBudgetResponse {
 // Control-plane projection of one authoritative MySQL certification. The
 // engine never queries MySQL while evaluating an order; it matches only this
 // local projection inside the verdict transaction.
+// Authorization requires passed, not invalidated, a covering stage, and matching
+// bot/config/prompt/policy/commit. No certification age-based TTL is enforced.
 message PutPromotionCertificationRequest {
   string cert_id = 1;
   string bot_uid = 2;
@@ -762,7 +765,7 @@ enum AccountOrderCoverage {
   AOC_NOT_APPLICABLE = 4;
 }
 message GetAccountOrderStateRequest {
-  string credential_id = 1;
+  string credential_id = 1; // Exchange identity: 1-10 decimal digits, no leading zero.
   uint32 max_items_per_section = 2; // 0 defaults to 500; maximum 1000.
   optional string expected_boot_id = 3;
   uint32 schema_version = 1000;
