@@ -2224,7 +2224,7 @@ mod tests {
     fn f5_public_filter_urls_are_derived_from_the_selected_venue() {
         assert_eq!(
             public_endpoint_url(Venue::Testnet, EXCHANGE_INFO_PATH),
-            "https://testnet.binancefuture.com/fapi/v1/exchangeInfo"
+            "https://demo-fapi.binance.com/fapi/v1/exchangeInfo"
         );
         assert_eq!(
             public_endpoint_url(Venue::Mainnet, EXCHANGE_INFO_PATH),
@@ -2232,7 +2232,7 @@ mod tests {
         );
         assert_eq!(
             public_endpoint_url(Venue::Testnet, MARK_PRICE_PATH),
-            "https://testnet.binancefuture.com/fapi/v1/premiumIndex"
+            "https://demo-fapi.binance.com/fapi/v1/premiumIndex"
         );
         let source = include_str!("exchange_filters.rs");
         let legacy_process_base_url = ["BINANCE_FUTURES_", "BASE_URL"].concat();

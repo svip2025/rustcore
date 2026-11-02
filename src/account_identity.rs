@@ -37,7 +37,7 @@ impl Domain {
         endpoint.set_query(None);
         endpoint.set_fragment(None);
         let venue = transport.venue.or_else(|| match endpoint.host_str() {
-            Some("testnet.binancefuture.com") => Some(Venue::Testnet),
+            Some("demo-fapi.binance.com" | "testnet.binancefuture.com") => Some(Venue::Testnet),
             Some("fapi.binance.com") => Some(Venue::Mainnet),
             _ => None,
         });
@@ -272,6 +272,23 @@ mod tests {
             Env::set(crate::venue::venue_env_name(credential), venue),
         ]
     }
+
+    #[test]
+    fn current_and_legacy_testnet_rest_hosts_infer_testnet_identity_domain() {
+        let _serial = crate::binance_futures::tests::env_serial_guard();
+        for endpoint in [
+            "https://demo-fapi.binance.com",
+            "https://testnet.binancefuture.com",
+        ] {
+            let _endpoint = Env::set("BINANCE_FUTURES_BASE_URL", endpoint);
+            let transport =
+                crate::venue::rest_transport_for_credential("testnet-endpoint-domain").unwrap();
+            assert_eq!(transport.venue, None);
+            let domain = Domain::from_transport(transport).unwrap();
+            assert_eq!(domain.venue, Some(Venue::Testnet));
+        }
+    }
+
     async fn store() -> (Store, std::path::PathBuf) {
         sqlx::any::install_default_drivers();
         let path = std::env::temp_dir().join(format!("rustcore-a1-{}.db", ulid::Ulid::new()));
