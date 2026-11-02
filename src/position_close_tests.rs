@@ -453,7 +453,7 @@ async fn b3_wire_close_without_historical_entry_run_remains_safe_and_unattribute
 }
 
 #[tokio::test]
-async fn b3_wire_exact_close_is_idempotent_and_other_positions_are_unchanged() {
+async fn wire_exact_close_is_idempotent_and_other_positions_are_unchanged() {
     let f = Fixture::new().await;
     exact_close_scenario(&f).await;
     f.cleanup().await;

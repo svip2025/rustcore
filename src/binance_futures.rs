@@ -7975,7 +7975,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn t38_429_retries_read_but_418_never_retries_and_engages_cooldown() {
+    async fn rate_limit_429_retries_read_but_418_never_retries_and_engages_cooldown() {
         let read_clock = Arc::new(ManualRetryClock::new(10_000));
         let (client, requests, records) = test_client_responses(
             vec![

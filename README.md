@@ -31,23 +31,11 @@ docker compose up -d
 cargo test
 ```
 
-Compose runs a disposable MySQL server on `127.0.0.1:13306`. The checked-in Cargo configuration supplies its test URL, requires MySQL rather than accepting a skipped backend, and includes every workspace member in the default test command. Tests create and migrate their own scratch databases; no separate migration command is needed. Do not point these tests at a database containing valuable data. The local MySQL root account has no password and is bound to loopback for this test setup only.
+Compose starts an isolated MySQL server on `127.0.0.1:13306`; tests create and migrate their scratch databases automatically.
 
-Expected summary totals across the workspace (Cargo prints one summary per binary):
+`cargo test` should report about **1,390 passing tests**; a cold build and test run on an 8-core machine takes about **10 minutes**.
 
-```text
-1388 top-level tests passed; 0 failed; 30 ignored
-4 additional child-helper invocations passed
-1392 passed when nested helper result lines are included
-```
-
-The child helpers are invoked by parent tests and are excluded from the top-level count; their standalone entries remain ignored. The release validation requires real MySQL, including transaction, connection-pool, and cancellation scenarios. The historical count of 1392 included those four nested helper results.
-
-Development and test builds omit debug symbols to reduce first-build time and use eight test threads by default. Assertions and overflow checks retain Cargo's normal development/test behavior. Set `RUST_TEST_THREADS` to override concurrency, or `CARGO_PROFILE_TEST_DEBUG=2` to build test debug symbols. Build time depends on hardware, database storage, and download speed.
-
-Release validation on an 8-vCPU, 16-GiB Linux host took **9 minutes 15.6 seconds** for a bundle clone, Compose readiness, and `cargo test` together. The build-output directory was empty; downloaded dependency sources were cached, and the task's MySQL server was already healthy. Cargo alone took 9 minutes 14.3 seconds. A separate first MySQL initialization took 29.2 seconds. Tool installation and uncached dependency downloads are outside that timing; it is not a promise for every machine or a fully cold end-to-end measurement.
-
-Some tests remain explicitly ignored: child-process helpers, additional private MySQL scenarios, and 15 integration scenarios requiring an external Python application checkout. The default command does not claim coverage of those scenarios. Read the `#[ignore]` reason before running an individual ignored test; running every ignored helper directly is not supported. An unset MySQL URL in an overridden configuration can otherwise make some tests return early and print `ok`; that is not evidence of MySQL coverage.
+30 tests are ignored: subprocess helpers and integration scenarios requiring an external application or fixture. See [Testing](docs/TESTING.md) for details.
 
 Check formatting and lints with:
 
@@ -70,7 +58,7 @@ cargo run --locked
 
 The server binds to `127.0.0.1:50051`, uses `sqlite://./data/rustcore.db`, and automatically creates its database and applies migrations. With no live authorization or exchange credentials, execution is paper-only. Public exchange connections default to testnet. See [.env.example](.env.example) for placeholder settings; the process reads environment variables, so export values explicitly when using a file.
 
-Mainnet requires an explicit `ENGINE_LIVE_ENABLED=1` opt-in and produces a prominent startup warning. That switch alone does not authorize an order: stage limits, matching nonexpired promotion certification, credentials, and normal admission checks still apply. No mainnet configuration example is supplied.
+Mainnet requires an explicit `ENGINE_LIVE_ENABLED=1` opt-in and produces a prominent startup warning. That switch alone does not authorize an order: stage limits, matching nonexpired promotion certification, credentials, and normal admission checks still apply. Before live orders, the caller must publish an unexpired stage certification confirming that the strategy has passed its paper/testnet stage. No mainnet configuration example is supplied.
 
 For a MySQL-backed engine, set `RUSTCORE_DB_URL` to your own engine database URL. `RUSTCORE_TEST_MYSQL_URL` is a separate scratch-database setting and is not the engine runtime database.
 
@@ -96,8 +84,8 @@ These tests demonstrate specific boundaries; they are not a proof that every exc
 | A stale risk budget rejects new exposure while allowing reduce-only close. | `risk_budget_freshness_dod_rejects_stale_open_but_allows_reduce_only_close` | [src/svc.rs](src/svc.rs) |
 | A non-idempotent write that requires verification selects truth lookup rather than blind retry. | `non_idempotent_write_returns_truth_lookup_not_retry` | [src/rate_limiter.rs](src/rate_limiter.rs) |
 | An unknown exchange outcome keeps the exit unresolved. | `an_unknown_exchange_outcome_must_not_release_the_exit` | [src/svc.rs](src/svc.rs) |
-| Retrying an exact paper position close is idempotent and leaves other positions unchanged. | `b3_wire_exact_close_is_idempotent_and_other_positions_are_unchanged` | [src/position_close_tests.rs](src/position_close_tests.rs) |
-| Read retries honor rate limits; an IP ban engages cooldown without retry. | `t38_429_retries_read_but_418_never_retries_and_engages_cooldown` | [src/binance_futures.rs](src/binance_futures.rs) |
+| Retrying an exact paper position close is idempotent and leaves other positions unchanged. | `wire_exact_close_is_idempotent_and_other_positions_are_unchanged` | [src/position_close_tests.rs](src/position_close_tests.rs) |
+| Read retries honor rate limits; an IP ban engages cooldown without retry. | `rate_limit_429_retries_read_but_418_never_retries_and_engages_cooldown` | [src/binance_futures.rs](src/binance_futures.rs) |
 | The file kill switch latches; deleting its file does not reset it. | `kill_switch_file_is_latched_within_poll_window_and_delete_does_not_reset` | [src/kill_switch.rs](src/kill_switch.rs) |
 | Failure to submit protection after an entry fill requests flattening and prevents a ready state. | `an_entry_fill_whose_protection_submit_fails_latches_flatten_and_not_ready` | [src/svc.rs](src/svc.rs) |
 
