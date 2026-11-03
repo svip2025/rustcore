@@ -21,7 +21,7 @@ service EngineEvents {
 
 message ExecuteIntentsRequest {
   string credential_id = 1;
-  string run_mode = 2; // paper|live
+  string run_mode = 2; // paper|demo|live_small|live
   repeated OrderIntent intents = 3;
 }
 
