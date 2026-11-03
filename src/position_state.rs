@@ -403,7 +403,7 @@ async fn active_position(
     }))
 }
 
-fn entry_authority_key(
+pub(crate) fn entry_authority_key(
     bot_uid: &str,
     symbol_key: &str,
     direction: &str,
