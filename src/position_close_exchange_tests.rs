@@ -588,6 +588,7 @@ async fn seed_exchange_position_in(
     run_mode: &str,
 ) {
     let entry_order = format!("entry_{position_id}");
+    let entry_verdict = format!("entry_risk_{position_id}");
     let mut tx = store.pool().begin().await.expect("begin seed");
     sqlx::query(
         "INSERT INTO position_state (position_id, credential_id, bot_uid, symbol_key, direction, \
@@ -605,11 +606,27 @@ async fn seed_exchange_position_in(
     .await
     .expect("seed exchange position");
     sqlx::query(
+        "INSERT INTO risk_verdicts (risk_verdict_id, intent_id, approved_intent_key, \
+         credential_id, bot_uid, symbol_key, created_at_ms, policy_version, policy_hash, \
+         decision, sizing_json, rules_json, evaluator_version) \
+         VALUES (?, ?, ?, ?, ?, ?, 1, 'fixture', 'fixture', 'approve', \
+         '{\"final_notional_usdt\":\"100\"}', '[]', 'fixture')",
+    )
+    .bind(&entry_verdict)
+    .bind(format!("intent_{entry_order}"))
+    .bind(format!("intent_{entry_order}"))
+    .bind(credential)
+    .bind(bot)
+    .bind(symbol_key)
+    .execute(&mut *tx)
+    .await
+    .expect("seed original Entry sizing verdict");
+    sqlx::query(
         "INSERT INTO engine_orders (engine_order_id, credential_id, bot_uid, idempotency_key, \
          client_order_id_short, exchange_order_id, exchange, market_kind, symbol_key, action, side, \
-         order_type, quantity, reduce_only, status, order_role, position_id, created_at_ms, \
+         order_type, quantity, reduce_only, status, order_role, position_id, risk_verdict_id, created_at_ms, \
          updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, 'binance', 'futures', ?, ?, ?, 'market', ?, 0, \
-         'filled', 'entry', ?, 1, 1)",
+         'filled', 'entry', ?, ?, 1, 1)",
     )
     .bind(&entry_order)
     .bind(credential)
@@ -622,6 +639,7 @@ async fn seed_exchange_position_in(
     .bind(direction)
     .bind(qty)
     .bind(position_id)
+    .bind(&entry_verdict)
     .execute(&mut *tx)
     .await
     .expect("seed filled entry order");
@@ -1017,6 +1035,476 @@ async fn full_fill_scenario(h: &Harness) {
 async fn exchange_close_full_fill_finalizes_from_truth_and_m0_cleans_after_venue_flat() {
     let h = Harness::sqlite(vec![OrderBehavior::FillNow], None).await;
     full_fill_scenario(&h).await;
+    h.cleanup().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn exchange_close_reconcile_releases_exact_original_entry_reservation() {
+    let h = Harness::sqlite(vec![OrderBehavior::FillNow], None).await;
+    let store = h.store();
+    // Original sizing can differ from both the entry fill and exit price (100).
+    // Keep the same credential's independent ETH reservation (100) intact.
+    let mut tx = store
+        .pool()
+        .begin()
+        .await
+        .expect("begin exact reservation seed");
+    sqlx::query("UPDATE risk_verdicts SET sizing_json=? WHERE risk_verdict_id=?")
+        .bind(r#"{"final_notional_usdt":"137.125"}"#)
+        .bind(format!("entry_risk_{POS}"))
+        .execute(&mut *tx)
+        .await
+        .expect("set original BTC Entry reservation");
+    assert!(
+        crate::risk::reserve_notional(&mut tx, CRED, "5000", "37.125", 2)
+            .await
+            .expect("reserve original sizing difference")
+    );
+    tx.commit().await.expect("commit exact reservation seed");
+    let reserved = || async {
+        sqlx::query("SELECT reserved_usdt FROM notional_reservations WHERE credential_id=?")
+            .bind(CRED)
+            .fetch_one(store.pool())
+            .await
+            .expect("durable reservation row")
+            .get::<String, _>("reserved_usdt")
+    };
+    assert_eq!(reserved().await, "237.125");
+
+    // Real gRPC exact close, production fill sink, TLS venue-flat read and
+    // ReconcileNow all complete before checking the released reservation.
+    full_fill_scenario(&h).await;
+    let after = reserved().await;
+    h.cleanup().await;
+    let normalized = if after.contains('.') {
+        after.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        &after
+    };
+    assert_eq!(
+        normalized,
+        "100",
+        "closed BTC must return exactly its original 137.125; sibling ETH retains 100 (stored {after})"
+    );
+}
+
+async fn reservation_amount(store: &Store) -> String {
+    let text: String =
+        sqlx::query("SELECT reserved_usdt FROM notional_reservations WHERE credential_id=?")
+            .bind(CRED)
+            .fetch_one(store.pool())
+            .await
+            .unwrap()
+            .get("reserved_usdt");
+    if text.contains('.') {
+        text.trim_end_matches('0').trim_end_matches('.').to_owned()
+    } else {
+        text
+    }
+}
+
+async fn reservation_marker_count(store: &Store) -> i64 {
+    sqlx::query("SELECT COUNT(*) AS n FROM notional_reservation_releases WHERE credential_id=?")
+        .bind(CRED)
+        .fetch_one(store.pool())
+        .await
+        .unwrap()
+        .get("n")
+}
+
+async fn seed_closed_reservation(h: &Harness, legacy: bool) {
+    let store = h.store();
+    if legacy {
+        let (_, exchange_id, client_id) = close_order(store, &format!("entry_{POS}")).await;
+        apply_trade_frame(
+            store,
+            exchange_id.parse().unwrap(),
+            &client_id,
+            "FILLED",
+            "1",
+            "1",
+            98_001,
+        )
+        .await;
+    }
+    let mut tx = store.pool().begin().await.unwrap();
+    if legacy {
+        sqlx::query(
+            "UPDATE engine_orders SET idempotency_key=?,updated_at_ms=1 WHERE engine_order_id=?",
+        )
+        .bind(crate::position_state::entry_authority_key(
+            BOT, BTC, "long", 1,
+        ))
+        .bind(format!("entry_{POS}"))
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE risk_verdicts SET replay_input_json=? WHERE risk_verdict_id=?")
+            .bind(r#"{"input":{"stage_certification":{"requested_stage":"demo"}}}"#)
+            .bind(format!("entry_risk_{POS}"))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM position_execution_provenance WHERE position_id=?")
+            .bind(POS)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+    }
+    crate::position_state::mark_position_closed(
+        &mut tx,
+        POS,
+        crate::svc::now_ms(),
+        None,
+        "fill_truth",
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    h.venue.with_book(|book| {
+        *book
+            .positions
+            .iter_mut()
+            .find(|position| position["symbol"] == "BTCUSDT")
+            .unwrap() = venue_position("BTCUSDT", "0");
+    });
+}
+
+async fn sweep_reservation(
+    h: &Harness,
+    covered: bool,
+    started: i64,
+) -> Result<usize, tonic::Status> {
+    let positions = h
+        .venue
+        .with_book(|book| serde_json::Value::Array(book.positions.clone()));
+    let covers = |symbol: &str| covered && symbol == BTC;
+    let observation = crate::position_close::VenuePositions {
+        positions: &positions,
+        read_started_at_ms: started,
+        covers: &covers,
+    };
+    crate::reservation_release::sweep_confirmed_flat_reservations(
+        h.store(),
+        CRED,
+        &observation,
+        started + 1,
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reservation_release_reconcile_and_process_restart_never_subtract_twice() {
+    let h = Harness::sqlite(vec![OrderBehavior::FillNow], None).await;
+    full_fill_scenario(&h).await;
+    for _ in 0..2 {
+        h.engine.reconcile_now(CRED).await;
+        assert_eq!(reservation_amount(h.store()).await, "100");
+        assert_eq!(reservation_marker_count(h.store()).await, 1);
+    }
+    let Harness {
+        venue,
+        _env,
+        engine,
+        database,
+    } = h;
+    let old_boot = engine.store.boot_id().to_owned();
+    let store = engine.stop().await;
+    store.pool().close().await;
+    let Database::Sqlite(path) = database else {
+        unreachable!("SQLite test")
+    };
+    let output = path.with_extension("reservation-restart.json");
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "position_close_exchange_tests::reservation_release_restart_child",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("F13_RESTART_DATABASE", &path)
+        .env("F13_RESTART_OUTPUT", &output)
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .unwrap();
+    wait_child(child, "reservation release restart").await;
+    let result: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&output).unwrap()).unwrap();
+    assert_ne!(result["boot_id"].as_str().unwrap(), old_boot);
+    assert_eq!(result["reserved_usdt"], "100");
+    assert_eq!(result["markers"], 1);
+    std::fs::remove_file(output).unwrap();
+    drop(venue);
+    drop(_env);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "subprocess only, invoked by the reservation restart regression"]
+async fn reservation_release_restart_child() {
+    sqlx::any::install_default_drivers();
+    let path = std::env::var("F13_RESTART_DATABASE").unwrap();
+    let output = std::env::var("F13_RESTART_OUTPUT").unwrap();
+    let store = Store::connect(&format!("sqlite://{path}")).await.unwrap();
+    let engine = Engine::start(store).await;
+    for _ in 0..2 {
+        engine.reconcile_now(CRED).await;
+        assert_eq!(reservation_amount(&engine.store).await, "100");
+        assert_eq!(reservation_marker_count(&engine.store).await, 1);
+    }
+    std::fs::write(output, serde_json::to_vec(&serde_json::json!({
+        "boot_id": engine.store.boot_id(), "reserved_usdt": reservation_amount(&engine.store).await,
+        "markers": reservation_marker_count(&engine.store).await,
+    })).unwrap()).unwrap();
+    engine.stop().await.pool().close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reservation_release_legacy_closed_entry_recovers_without_rebuilding_provenance() {
+    let h = Harness::sqlite(vec![], None).await;
+    seed_closed_reservation(&h, true).await;
+    assert_eq!(reservation_amount(h.store()).await, "200");
+    h.engine.reconcile_now(CRED).await;
+    assert_eq!(reservation_amount(h.store()).await, "100");
+    assert_eq!(reservation_marker_count(h.store()).await, 1);
+    let proof: i64 =
+        sqlx::query("SELECT COUNT(*) AS n FROM position_execution_provenance WHERE position_id=?")
+            .bind(POS)
+            .fetch_one(h.store().pool())
+            .await
+            .unwrap()
+            .get("n");
+    assert_eq!(
+        proof, 0,
+        "allocation recovery must not restore close authority"
+    );
+    h.engine.reconcile_now(CRED).await;
+    assert_eq!(reservation_amount(h.store()).await, "100");
+    h.cleanup().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reservation_release_retains_allocation_without_exact_closed_fresh_flat_lineage() {
+    for case in [
+        "local_nonzero",
+        "venue_nonzero",
+        "coverage",
+        "stale",
+        "pending",
+        "lineage",
+    ] {
+        let h = Harness::sqlite(vec![], None).await;
+        seed_closed_reservation(&h, false).await;
+        let fresh = crate::svc::now_ms() + 10_000;
+        match case {
+            "local_nonzero" => {
+                sqlx::query("UPDATE position_state SET qty='0.0001' WHERE position_id=?")
+                    .bind(POS)
+                    .execute(h.store().pool())
+                    .await
+                    .unwrap();
+            }
+            "venue_nonzero" => {
+                h.venue.with_book(|book| {
+                    *book
+                        .positions
+                        .iter_mut()
+                        .find(|row| row["symbol"] == "BTCUSDT")
+                        .unwrap() = venue_position("BTCUSDT", "0.0001");
+                });
+            }
+            "stale" => {
+                sqlx::query("UPDATE engine_orders SET updated_at_ms=? WHERE engine_order_id=?")
+                    .bind(fresh)
+                    .bind(format!("entry_{POS}"))
+                    .execute(h.store().pool())
+                    .await
+                    .unwrap();
+            }
+            "pending" => {
+                sqlx::query(
+                    "UPDATE engine_orders SET status='pending_submit' WHERE engine_order_id=?",
+                )
+                .bind(format!("entry_{POS}"))
+                .execute(h.store().pool())
+                .await
+                .unwrap();
+            }
+            "lineage" => {
+                sqlx::query(
+                    "UPDATE position_execution_provenance SET entry_epoch=2 WHERE position_id=?",
+                )
+                .bind(POS)
+                .execute(h.store().pool())
+                .await
+                .unwrap();
+            }
+            "coverage" => {}
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            sweep_reservation(&h, case != "coverage", fresh)
+                .await
+                .unwrap(),
+            0,
+            "{case}"
+        );
+        assert_eq!(reservation_amount(h.store()).await, "200", "{case}");
+        assert_eq!(reservation_marker_count(h.store()).await, 0, "{case}");
+        h.cleanup().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reservation_release_legacy_requires_epoch_stage_and_original_exchange_fill() {
+    for case in [
+        "epoch",
+        "stage",
+        "missing_fill",
+        "unknown_symbol",
+        "wrong_exchange_order",
+    ] {
+        let h = Harness::sqlite(vec![], None).await;
+        seed_closed_reservation(&h, true).await;
+        match case {
+            "epoch" => {
+                sqlx::query("UPDATE engine_orders SET idempotency_key='wrong-epoch' WHERE engine_order_id=?").bind(format!("entry_{POS}")).execute(h.store().pool()).await.unwrap();
+            }
+            "stage" => {
+                sqlx::query(
+                    "UPDATE risk_verdicts SET replay_input_json='{}' WHERE risk_verdict_id=?",
+                )
+                .bind(format!("entry_risk_{POS}"))
+                .execute(h.store().pool())
+                .await
+                .unwrap();
+            }
+            "missing_fill" => {
+                sqlx::query("DELETE FROM engine_fills WHERE engine_order_id=?")
+                    .bind(format!("entry_{POS}"))
+                    .execute(h.store().pool())
+                    .await
+                    .unwrap();
+            }
+            "unknown_symbol" => {
+                sqlx::query("UPDATE engine_fills SET symbol_scope_known=0 WHERE engine_order_id=?")
+                    .bind(format!("entry_{POS}"))
+                    .execute(h.store().pool())
+                    .await
+                    .unwrap();
+            }
+            "wrong_exchange_order" => {
+                sqlx::query("UPDATE engine_fills SET exchange_order_id='different-order' WHERE engine_order_id=?").bind(format!("entry_{POS}")).execute(h.store().pool()).await.unwrap();
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            sweep_reservation(&h, true, crate::svc::now_ms() + 10_000)
+                .await
+                .unwrap(),
+            0,
+            "{case}"
+        );
+        assert_eq!(reservation_amount(h.store()).await, "200", "{case}");
+        assert_eq!(reservation_marker_count(h.store()).await, 0, "{case}");
+        h.cleanup().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reservation_release_marker_or_subtraction_failure_rolls_back_and_retries_once() {
+    for (table, operation, condition) in [
+        (
+            "notional_reservation_releases",
+            "INSERT",
+            "NEW.credential_id='61'",
+        ),
+        (
+            "notional_reservations",
+            "UPDATE",
+            "NEW.credential_id='61' AND NEW.reserved_usdt != OLD.reserved_usdt",
+        ),
+    ] {
+        let h = Harness::sqlite(vec![], None).await;
+        seed_closed_reservation(&h, false).await;
+        sqlx::query(&format!("CREATE TRIGGER f13_reservation_fault BEFORE {operation} ON {table} WHEN {condition} BEGIN SELECT RAISE(ABORT,'F13_RESERVATION_WRITE_FAILURE'); END"))
+            .execute(h.store().pool()).await.unwrap();
+        let error = sweep_reservation(&h, true, crate::svc::now_ms() + 10_000)
+            .await
+            .expect_err("real SQLite trigger must abort release");
+        assert!(
+            error.message().contains("F13_RESERVATION_WRITE_FAILURE"),
+            "{error}"
+        );
+        assert_eq!(reservation_amount(h.store()).await, "200");
+        assert_eq!(
+            reservation_marker_count(h.store()).await,
+            0,
+            "marker and subtraction share one transaction"
+        );
+        sqlx::query("DROP TRIGGER f13_reservation_fault")
+            .execute(h.store().pool())
+            .await
+            .unwrap();
+        assert_eq!(
+            sweep_reservation(&h, true, crate::svc::now_ms() + 10_000)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(reservation_amount(h.store()).await, "100");
+        assert_eq!(reservation_marker_count(h.store()).await, 1);
+        assert_eq!(
+            sweep_reservation(&h, true, crate::svc::now_ms() + 10_000)
+                .await
+                .unwrap(),
+            0
+        );
+        h.cleanup().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mysql_reservation_release_exact_close_and_reconcile_are_idempotent() {
+    let Some(h) = Harness::mysql(
+        "mysql_reservation_release_exact_close_and_reconcile_are_idempotent",
+        vec![OrderBehavior::FillNow],
+    )
+    .await
+    else {
+        return;
+    };
+    full_fill_scenario(&h).await;
+    for _ in 0..2 {
+        h.engine.reconcile_now(CRED).await;
+        assert_eq!(reservation_amount(h.store()).await, "100");
+        assert_eq!(reservation_marker_count(h.store()).await, 1);
+    }
+    h.cleanup().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mysql_reservation_release_concurrent_sweeps_subtract_only_once() {
+    let Some(h) = Harness::mysql(
+        "mysql_reservation_release_concurrent_sweeps_subtract_only_once",
+        vec![],
+    )
+    .await
+    else {
+        return;
+    };
+    seed_closed_reservation(&h, false).await;
+    let fresh = crate::svc::now_ms() + 10_000;
+    let (first, second) = tokio::join!(
+        sweep_reservation(&h, true, fresh),
+        sweep_reservation(&h, true, fresh)
+    );
+    assert_eq!(first.unwrap() + second.unwrap(), 1);
+    assert_eq!(reservation_amount(h.store()).await, "100");
+    assert_eq!(reservation_marker_count(h.store()).await, 1);
     h.cleanup().await;
 }
 

@@ -65,6 +65,7 @@ mod protection_dispatch;
 mod rate_limiter;
 mod reconcile;
 mod reconcile_trace;
+mod reservation_release;
 mod risk;
 mod simulation_quote;
 mod store;

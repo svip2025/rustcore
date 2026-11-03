@@ -2459,6 +2459,29 @@ where
                         status.message()
                     )
                 })?;
+        // F-13: all exchange close sources (including historical closed rows)
+        // return their exact original Entry allocation only with this round's
+        // fresh, covered venue-flat truth. Never reset the credential pool.
+        let released = crate::reservation_release::sweep_confirmed_flat_reservations(
+            &store,
+            credential_id,
+            &venue,
+            now_ms(),
+        )
+        .await
+        .map_err(|status| {
+            anyhow::anyhow!(
+                "release closed Entry reservations failed: {}",
+                status.message()
+            )
+        })?;
+        if released > 0 {
+            tracing::info!(
+                credential_id,
+                released,
+                "reconcile released confirmed-flat Entry allocations"
+            );
+        }
         if finalized > 0 {
             tracing::info!(
                 credential_id = %credential_id,
