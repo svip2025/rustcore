@@ -30,6 +30,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      RUST_TEST_THREADS: "4"
+      RUSTCORE_REQUIRE_MYSQL_TESTS: "1"
+      RUSTCORE_REQUIRE_LOCAL_SOCKET_TESTS: "1"
     services:
       mysql:
         image: mysql:8.4
