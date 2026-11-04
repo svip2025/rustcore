@@ -2715,10 +2715,7 @@ async fn round2_close_fixture_isolates_a_prior_egress_bucket_without_resetting_i
     )
     .unwrap();
     let prior_limiter = crate::rate_limiter::CredentialRateLimiter::shared(
-        crate::rate_limiter::TokenBucketConfig {
-            capacity: 100.0,
-            refill_per_sec: 0.0,
-        },
+        crate::rate_limiter::TokenBucketConfig::for_test(100.0, 0.0),
     );
     prior_limiter.set_stored_tokens(&inherited_scope, 0.0).await;
     let venue = TlsFakeVenue::start();
