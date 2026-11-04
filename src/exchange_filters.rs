@@ -1582,7 +1582,25 @@ mod tests {
             .split_once("#[cfg(test)]\npub(crate) mod tests")
             .map(|(production, _)| production)
             .expect("binance_futures production source");
-        assert_eq!(binance_futures.matches("signed_get_json(").count(), 9);
+        // Round 2A adds one explicitly scoped funding read. Preserve the
+        // pre-existing call-site budget rather than raising its allowance.
+        let funding_start = binance_futures
+            .find("    pub(crate) async fn funding_income_window(")
+            .expect("funding income reader boundary");
+        let funding_end = funding_start
+            + binance_futures[funding_start..]
+                .find("    async fn signed_get_json(")
+                .expect("signed GET helper after funding reader");
+        let funding = &binance_futures[funding_start..funding_end];
+        let unchanged = format!(
+            "{}{}",
+            &binance_futures[..funding_start],
+            &binance_futures[funding_end..]
+        );
+        assert_eq!(unchanged.matches("signed_get_json(").count(), 9);
+        assert_eq!(funding.matches("signed_get_json(").count(), 1);
+        assert_eq!(funding.matches("\"/fapi/v1/income\"").count(), 1);
+        assert_eq!(funding.matches("\"FUNDING_FEE\"").count(), 1);
     }
 
     /// **接线证明**：驱动真实的 `fetch_public` 分支，而不是直接调发布 helper。
