@@ -324,6 +324,60 @@ async fn replaying_a_close_or_reclosing_a_closed_position_keeps_one_lifecycle() 
     cleanup_dir(&store, &dir).await;
 }
 
+#[tokio::test]
+async fn round2_position_close_and_cleanup_obligation_roll_back_together() {
+    let (store, dir) = scratch_store("round2-close-rollback").await;
+    seed_position(
+        &store,
+        "round2-rollback-pos",
+        "round2-rollback-cred",
+        "round2-bot",
+        "long",
+        "open",
+        "1",
+        SYMBOL_KEY,
+    )
+    .await;
+    seed_protection(
+        &store,
+        "round2-rollback-sl",
+        "round2-rollback-pos",
+        "round2-rollback-cred",
+        "sl",
+        "round2-rollback-order",
+        Some("999"),
+        Some("round2-sl"),
+        "confirmed",
+    )
+    .await;
+    let mut tx = store.pool().begin().await.unwrap();
+    crate::position_state::mark_position_closed(
+        &mut tx,
+        "round2-rollback-pos",
+        2000,
+        None,
+        "exchange_truth",
+    )
+    .await
+    .unwrap();
+    let pending = sqlx::query("SELECT COUNT(*) AS n FROM protection_cleanup_obligations WHERE position_id='round2-rollback-pos'").fetch_one(&mut *tx).await.unwrap().get::<i64, _>("n");
+    assert_eq!(
+        pending, 1,
+        "the obligation is inside the same close transaction"
+    );
+    tx.rollback().await.unwrap();
+    let state = sqlx::query(
+        "SELECT state, qty FROM position_state WHERE position_id='round2-rollback-pos'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(state.get::<String, _>("state"), "open");
+    assert_eq!(state.get::<String, _>("qty"), "1");
+    assert_eq!(obligation_row_count(&store, "round2-rollback-pos").await, 0);
+    cleanup_dir(&store, &dir).await;
+}
+
 /// **P0-1 预检的侧向映射**（与 `apply_exchange_position_truth` 同一份）：
 /// 单向持仓 BOTH 按数量符号归属方向、零数量对两侧都成立；双向持仓
 /// LONG/SHORT 各说各的；缺席、不可解析、未知 positionSide、非数组一律歧义；
@@ -551,8 +605,17 @@ async fn exit_fill_close_writes_a_cleanup_obligation_in_the_same_transaction() {
     let (store, dir) = scratch_store("m0create").await;
     let credential_id = "m0-create-cred";
     let bot_uid = "bot_m0create";
-    seed_position(&store, "pos_m0create", credential_id, bot_uid, "long", "open", "1", SYMBOL_KEY)
-        .await;
+    seed_position(
+        &store,
+        "pos_m0create",
+        credential_id,
+        bot_uid,
+        "long",
+        "open",
+        "1",
+        SYMBOL_KEY,
+    )
+    .await;
     seed_protection(
         &store,
         "prot_m0create_sl",
@@ -580,11 +643,12 @@ async fn exit_fill_close_writes_a_cleanup_obligation_in_the_same_transaction() {
 
     apply_exit_fill(&store, credential_id, bot_uid, SYMBOL_KEY, "1").await;
 
-    let position: String = sqlx::query("SELECT state FROM position_state WHERE position_id='pos_m0create'")
-        .fetch_one(store.pool())
-        .await
-        .expect("load position")
-        .get("state");
+    let position: String =
+        sqlx::query("SELECT state FROM position_state WHERE position_id='pos_m0create'")
+            .fetch_one(store.pool())
+            .await
+            .expect("load position")
+            .get("state");
     assert_eq!(position, "closed", "the exit fill must close the position");
     let obligation = obligation_state(&store, "pos_m0create").await;
     assert_eq!(
@@ -602,8 +666,17 @@ async fn exit_fill_close_writes_a_cleanup_obligation_in_the_same_transaction() {
 async fn exchange_position_truth_zero_writes_a_cleanup_obligation() {
     let (store, dir) = scratch_store("m0truth").await;
     let credential_id = "m0-truth-cred";
-    seed_position(&store, "pos_m0truth", credential_id, "bot_m0truth", "long", "open", "1", SYMBOL_KEY)
-        .await;
+    seed_position(
+        &store,
+        "pos_m0truth",
+        credential_id,
+        "bot_m0truth",
+        "long",
+        "open",
+        "1",
+        SYMBOL_KEY,
+    )
+    .await;
     seed_protection(
         &store,
         "prot_m0truth_tp",
@@ -644,7 +717,10 @@ async fn exchange_position_truth_zero_writes_a_cleanup_obligation() {
     tx.commit().await.expect("commit truth tx");
 
     assert_eq!(
-        obligation_state(&store, "pos_m0truth").await.as_ref().map(|(state, _, _)| state.as_str()),
+        obligation_state(&store, "pos_m0truth")
+            .await
+            .as_ref()
+            .map(|(state, _, _)| state.as_str()),
         Some("pending"),
         "venue-zero truth must durably record the cleanup obligation"
     );
@@ -660,8 +736,17 @@ async fn exchange_position_truth_zero_writes_a_cleanup_obligation() {
 async fn paper_close_completes_the_simulation_obligation_trivially_in_transaction() {
     let (store, dir) = scratch_store("m0paper").await;
     let credential_id = "paper:0123456789abcdef0123456789abcdef";
-    seed_position(&store, "pos_m0paper", credential_id, "bot_m0paper", "long", "open", "1", SYMBOL_KEY)
-        .await;
+    seed_position(
+        &store,
+        "pos_m0paper",
+        credential_id,
+        "bot_m0paper",
+        "long",
+        "open",
+        "1",
+        SYMBOL_KEY,
+    )
+    .await;
     // 本地保护行（requested、无任何 venue 身份）：模拟路径的真实形状。
     seed_protection(
         &store,
@@ -725,7 +810,11 @@ async fn paper_close_completes_the_simulation_obligation_trivially_in_transactio
 
     assert_eq!(
         obligation_state(&store, "pos_m0paper").await,
-        Some(("complete".to_string(), "paper_run_no_venue_protection".to_string(), 0)),
+        Some((
+            "complete".to_string(),
+            "paper_run_no_venue_protection".to_string(),
+            0
+        )),
         "a paper-run close with no venue-side protection must complete the obligation \
          in-transaction with a recorded reason"
     );
@@ -736,7 +825,10 @@ async fn paper_close_completes_the_simulation_obligation_trivially_in_transactio
         .await
         .expect("probe entry scope");
     tx.commit().await.expect("commit entry probe");
-    assert!(!pending, "a trivially-complete simulation obligation must not gate re-entry");
+    assert!(
+        !pending,
+        "a trivially-complete simulation obligation must not gate re-entry"
+    );
     cleanup_dir(&store, &dir).await;
 }
 
@@ -746,8 +838,17 @@ async fn paper_close_completes_the_simulation_obligation_trivially_in_transactio
 async fn entry_scope_pending_matches_only_the_exact_pending_scope() {
     let (store, dir) = scratch_store("m0scope").await;
     let credential_id = "m0-scope-cred";
-    seed_position(&store, "pos_m0scope", credential_id, "bot_m0scope", "long", "open", "1", SYMBOL_KEY)
-        .await;
+    seed_position(
+        &store,
+        "pos_m0scope",
+        credential_id,
+        "bot_m0scope",
+        "long",
+        "open",
+        "1",
+        SYMBOL_KEY,
+    )
+    .await;
     seed_protection(
         &store,
         "prot_m0scope_sl",
@@ -779,8 +880,17 @@ async fn entry_scope_pending_matches_only_the_exact_pending_scope() {
     );
     // 仍 open 的第二仓位（在开事务**之前**种好：SQLite 单写者，别在持事务
     // 时再走池写）。
-    seed_position(&store, "pos_m0scope2", credential_id, "bot_m0scope2", "long", "open", "1", SYMBOL_KEY)
-        .await;
+    seed_position(
+        &store,
+        "pos_m0scope2",
+        credential_id,
+        "bot_m0scope2",
+        "long",
+        "open",
+        "1",
+        SYMBOL_KEY,
+    )
+    .await;
 
     let mut tx = store.pool().begin().await.expect("begin scope tx");
     for (symbol_key, direction, expected) in [
@@ -835,13 +945,25 @@ async fn entry_scope_pending_matches_only_the_exact_pending_scope() {
 async fn pending_obligation_survives_a_store_restart_and_completes() {
     let (store, dir) = scratch_store("m0restart").await;
     let credential_id = "m0-restart-cred";
-    seed_position(&store, "pos_m0restart", credential_id, "bot_m0restart", "long", "open", "1", SYMBOL_KEY)
-        .await;
+    seed_position(
+        &store,
+        "pos_m0restart",
+        credential_id,
+        "bot_m0restart",
+        "long",
+        "open",
+        "1",
+        SYMBOL_KEY,
+    )
+    .await;
     // 没有任何保护单：重启后驱动应立即以 no_protection_orders 完成——
     // 完成状态必须由重启后的那次扫描写入，而不是创建时。
     apply_exit_fill(&store, credential_id, "bot_m0restart", SYMBOL_KEY, "1").await;
     assert_eq!(
-        obligation_state(&store, "pos_m0restart").await.as_ref().map(|(s, _, _)| s.as_str()),
+        obligation_state(&store, "pos_m0restart")
+            .await
+            .as_ref()
+            .map(|(s, _, _)| s.as_str()),
         Some("pending"),
         "fixture: the obligation starts pending"
     );
@@ -854,13 +976,24 @@ async fn pending_obligation_survives_a_store_restart_and_completes() {
     let driven = drive_due_obligations(&reopened)
         .await
         .expect("drive after restart");
-    assert_eq!(driven, 1, "the restarted scan must pick the durable obligation up");
+    assert_eq!(
+        driven, 1,
+        "the restarted scan must pick the durable obligation up"
+    );
     assert_eq!(
         obligation_state(&reopened, "pos_m0restart").await,
-        Some(("complete".to_string(), "no_protection_orders".to_string(), 1)),
+        Some((
+            "complete".to_string(),
+            "no_protection_orders".to_string(),
+            1
+        )),
         "the obligation must complete only after the post-restart drive"
     );
-    cleanup_dir(&reopened, &db_path.parent().expect("parent dir").to_path_buf()).await;
+    cleanup_dir(
+        &reopened,
+        &db_path.parent().expect("parent dir").to_path_buf(),
+    )
+    .await;
 }
 
 /// 需求④/②（真 MySQL）：义务持久化、同事务落库与闸门查询在 MySQL 方言下
@@ -877,8 +1010,17 @@ async fn mysql_close_writes_and_gates_the_cleanup_obligation() {
     };
     let store = scratch.connect_store().await;
     let credential_id = "m0-mysql-cred";
-    seed_position(&store, "pos_m0mysql", credential_id, "bot_m0mysql", "long", "open", "1", SYMBOL_KEY)
-        .await;
+    seed_position(
+        &store,
+        "pos_m0mysql",
+        credential_id,
+        "bot_m0mysql",
+        "long",
+        "open",
+        "1",
+        SYMBOL_KEY,
+    )
+    .await;
     seed_protection(
         &store,
         "prot_m0mysql_sl",
@@ -906,7 +1048,10 @@ async fn mysql_close_writes_and_gates_the_cleanup_obligation() {
 
     apply_exit_fill(&store, credential_id, "bot_m0mysql", SYMBOL_KEY, "1").await;
     assert_eq!(
-        obligation_state(&store, "pos_m0mysql").await.as_ref().map(|(s, _, _)| s.as_str()),
+        obligation_state(&store, "pos_m0mysql")
+            .await
+            .as_ref()
+            .map(|(s, _, _)| s.as_str()),
         Some("pending"),
         "MySQL: the close transaction must persist the obligation"
     );
@@ -915,13 +1060,15 @@ async fn mysql_close_writes_and_gates_the_cleanup_obligation() {
     let gated = entry_scope_pending_in_tx(&mut tx, credential_id, SYMBOL_KEY, "long")
         .await
         .expect("mysql gate probe");
-    let other_direction =
-        entry_scope_pending_in_tx(&mut tx, credential_id, SYMBOL_KEY, "short")
-            .await
-            .expect("mysql gate probe short");
+    let other_direction = entry_scope_pending_in_tx(&mut tx, credential_id, SYMBOL_KEY, "short")
+        .await
+        .expect("mysql gate probe short");
     tx.commit().await.expect("commit mysql gate tx");
     assert!(gated, "MySQL: the same scope is gated");
-    assert!(!other_direction, "MySQL: the opposite direction is not gated");
+    assert!(
+        !other_direction,
+        "MySQL: the opposite direction is not gated"
+    );
 
     // 驱动一次（无凭据环境 ⇒ 如实挂起并退避），验证 attempts/退避在 MySQL
     // 上持久，而不是内存态。
@@ -943,9 +1090,7 @@ async fn mysql_close_writes_and_gates_the_cleanup_obligation() {
     let outcomes = crate::store::try_get_nullable_bytes(&row, "attempt_outcomes_json")
         .expect("decode attempt outcomes column");
     assert!(
-        outcomes
-            .as_deref()
-            .is_some_and(|value| !value.is_empty()),
+        outcomes.as_deref().is_some_and(|value| !value.is_empty()),
         "the attempt outcome must be recorded"
     );
 
@@ -1164,7 +1309,11 @@ mod fake_venue_tests {
         names: Vec<String>,
     }
 
-    fn set_l4_env(fake_path: &std::path::Path, root: &std::path::Path, credential_id: &str) -> L4Env {
+    fn set_l4_env(
+        fake_path: &std::path::Path,
+        root: &std::path::Path,
+        credential_id: &str,
+    ) -> L4Env {
         let (key_env, secret_env) = crate::binance_futures::key_env_names(credential_id);
         let names = [
             "L4_FAULT_INJECTION_ENABLED".to_string(),
@@ -1280,8 +1429,17 @@ mod fake_venue_tests {
     /// actualOrderId 形状），全部在替身上活着。
     async fn seed_closed_position_with_live_protection(store: &Store, credential_id: &str) {
         let bot_uid = "bot_m0l4";
-        seed_position(store, "pos_m0l4", credential_id, bot_uid, "long", "open", "1", SYMBOL_KEY)
-            .await;
+        seed_position(
+            store,
+            "pos_m0l4",
+            credential_id,
+            bot_uid,
+            "long",
+            "open",
+            "1",
+            SYMBOL_KEY,
+        )
+        .await;
         seed_protection(
             store,
             "prot_m0l4_sl",
@@ -1363,18 +1521,32 @@ mod fake_venue_tests {
 
         apply_exit_fill(&store, credential_id, "bot_m0l4", SYMBOL_KEY, "1").await;
         assert_eq!(
-            obligation_state(&store, "pos_m0l4").await.as_ref().map(|(s, _, _)| s.as_str()),
+            obligation_state(&store, "pos_m0l4")
+                .await
+                .as_ref()
+                .map(|(s, _, _)| s.as_str()),
             Some("pending"),
             "fixture: the close created a pending obligation"
         );
 
-        let driven = drive_due_obligations(&store).await.expect("drive the obligation");
+        let driven = drive_due_obligations(&store)
+            .await
+            .expect("drive the obligation");
         assert_eq!(driven, 1);
 
         // 替身交易所：两张 Algo 与那条普通子单都终局撤销。
-        assert_eq!(fake_algo_status(&venue, 101).await, ("CANCELED".to_string(), 0));
-        assert_eq!(fake_algo_status(&venue, 102).await, ("CANCELED".to_string(), 0));
-        assert_eq!(fake_order_status(&venue, 201).await, ("CANCELED".to_string(), 0));
+        assert_eq!(
+            fake_algo_status(&venue, 101).await,
+            ("CANCELED".to_string(), 0)
+        );
+        assert_eq!(
+            fake_algo_status(&venue, 102).await,
+            ("CANCELED".to_string(), 0)
+        );
+        assert_eq!(
+            fake_order_status(&venue, 201).await,
+            ("CANCELED".to_string(), 0)
+        );
 
         // 本地权威表同样收敛到终态（真值写入，不是撤单回执）。
         for po in ["prot_m0l4_sl", "prot_m0l4_tp"] {
@@ -1442,6 +1614,104 @@ mod fake_venue_tests {
         cleanup_dir(&store, &dir).await;
     }
 
+    // S2/S3: REST observes the zero position after a protection fill, even
+    // when the corresponding user-stream notification was lost. The triggered
+    // leg's actual order is terminal; cleanup must cancel its sibling without
+    // submitting a second close or a new entry. This proves offline logic,
+    // not Binance testnet's real Algo lifecycle/response format.
+    #[tokio::test]
+    async fn round2_protection_trigger_then_rest_zero_cleans_sibling_for_both_directions() {
+        let _serial = crate::binance_futures::tests::env_serial_guard();
+        for direction in ["long", "short"] {
+            for trigger_sl in [true, false] {
+                let (store, dir) = scratch_store("round2-trigger-sibling").await;
+                let fake_path = dir.join("fake-exchange.sqlite");
+                let venue = seed_fake_venue(&fake_path).await;
+                seed_fake_algo(&venue, 101, "coid_m0l4_sl").await;
+                seed_fake_algo(&venue, 102, "coid_m0l4_tp").await;
+                seed_fake_order(&venue, 201, "coid_m0l4_child").await;
+                let credential = "round2-trigger-cred";
+                seed_closed_position_with_live_protection(&store, credential).await;
+                if direction == "short" {
+                    sqlx::query("UPDATE position_state SET direction='short', active_key='bot_m0l4|binance|futures|BTC|USDT|USDT|short' WHERE position_id='pos_m0l4'").execute(store.pool()).await.unwrap();
+                }
+                let (triggered, sibling) = if trigger_sl { (101, 102) } else { (102, 101) };
+                sqlx::query("UPDATE algo_orders SET algo_status='FINISHED', is_open=0, actual_order_id='201' WHERE algo_id=?").bind(triggered).execute(&venue).await.unwrap();
+                sqlx::query("UPDATE orders SET status='FILLED', is_open=0, orig_qty='1', executed_qty='1' WHERE order_id=201").execute(&venue).await.unwrap();
+                let _env = set_l4_env(&fake_path, &dir, credential);
+                let mut tx = store.pool().begin().await.unwrap();
+                crate::position_state::apply_exchange_position_truth(
+                    &mut tx,
+                    credential,
+                    "BTCUSDT",
+                    Some("BOTH"),
+                    "0",
+                    None,
+                    2000,
+                )
+                .await
+                .unwrap();
+                tx.commit().await.unwrap();
+                assert_eq!(
+                    obligation_state(&store, "pos_m0l4").await.unwrap().0,
+                    "pending"
+                );
+                let now = crate::svc::now_ms();
+                for attempt in 0..3 {
+                    crate::protection_cleanup::drive_due_obligations_at(
+                        &store,
+                        now + attempt * 100_000,
+                    )
+                    .await
+                    .unwrap();
+                    if obligation_state(&store, "pos_m0l4").await.unwrap().0 == "complete" {
+                        break;
+                    }
+                }
+                assert_eq!(
+                    obligation_state(&store, "pos_m0l4").await.unwrap().0,
+                    "complete",
+                    "direction={direction} trigger_sl={trigger_sl}"
+                );
+                assert_eq!(
+                    fake_algo_status(&venue, triggered).await,
+                    ("FINISHED".into(), 0)
+                );
+                assert_eq!(
+                    fake_algo_status(&venue, sibling).await,
+                    ("CANCELED".into(), 0)
+                );
+                let remaining =
+                    sqlx::query("SELECT COUNT(*) AS n FROM algo_orders WHERE is_open=1")
+                        .fetch_one(&venue)
+                        .await
+                        .unwrap()
+                        .get::<i64, _>("n");
+                assert_eq!(remaining, 0);
+                let log = request_log(&venue).await;
+                assert!(
+                    !log.iter().any(|(method, _)| method == "POST"),
+                    "cleanup must never send a new entry or close: {log:?}"
+                );
+                // A repeated sweep must remain complete and send no further cancels.
+                let deletes = log.iter().filter(|(method, _)| method == "DELETE").count();
+                crate::protection_cleanup::drive_due_obligations_at(&store, now + 500_000)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    request_log(&venue)
+                        .await
+                        .iter()
+                        .filter(|(method, _)| method == "DELETE")
+                        .count(),
+                    deletes
+                );
+                venue.close().await;
+                cleanup_dir(&store, &dir).await;
+            }
+        }
+    }
+
     /// 需求②（必测 b）：撤单请求遭遇传输/未知错误 ⇒ 义务保持挂起并退避
     /// 重试；恢复后由真值确认完成。替身的 request_log 一撤就写，把它拆掉
     /// 即可让每次交易所调用以错误返回（等价于传输失败/超时——驱动器把
@@ -1470,7 +1740,9 @@ mod fake_venue_tests {
             .expect("break the fake venue transport");
         broken.close().await;
 
-        let driven = drive_due_obligations(&store).await.expect("drive against a failing venue");
+        let driven = drive_due_obligations(&store)
+            .await
+            .expect("drive against a failing venue");
         assert_eq!(driven, 1, "the attempt ran and failed");
         assert_eq!(
             obligation_state(&store, "pos_m0l4").await,
@@ -1483,7 +1755,10 @@ mod fake_venue_tests {
                 .await
                 .expect("load backoff")
                 .get("next_attempt_at_ms");
-        assert!(deferred_to > 0, "the retry must be durably scheduled with backoff");
+        assert!(
+            deferred_to > 0,
+            "the retry must be durably scheduled with backoff"
+        );
         assert_eq!(
             fake_algo_status(&venue, 101).await,
             ("NEW".to_string(), 1),
@@ -1506,14 +1781,19 @@ mod fake_venue_tests {
             .await
             .expect("force the backoff due");
 
-        let driven = drive_due_obligations(&store).await.expect("retry the obligation");
+        let driven = drive_due_obligations(&store)
+            .await
+            .expect("retry the obligation");
         assert_eq!(driven, 1);
         assert_eq!(
             obligation_state(&store, "pos_m0l4").await,
             Some(("complete".to_string(), "truth_confirmed".to_string(), 2)),
             "the retry must complete the obligation only after truth"
         );
-        assert_eq!(fake_algo_status(&venue, 101).await, ("CANCELED".to_string(), 0));
+        assert_eq!(
+            fake_algo_status(&venue, 101).await,
+            ("CANCELED".to_string(), 0)
+        );
 
         venue.close().await;
         cleanup_dir(&store, &dir).await;
@@ -1533,8 +1813,17 @@ mod fake_venue_tests {
         let credential_id = "m0-openpos-cred";
         seed_closed_position_with_live_protection(&store, credential_id).await;
         let bot_uid = "bot_m0other";
-        seed_position(&store, "pos_m0other", credential_id, bot_uid, "long", "open", "1", SYMBOL_KEY)
-            .await;
+        seed_position(
+            &store,
+            "pos_m0other",
+            credential_id,
+            bot_uid,
+            "long",
+            "open",
+            "1",
+            SYMBOL_KEY,
+        )
+        .await;
         seed_protection(
             &store,
             "prot_m0other_sl",
@@ -1562,11 +1851,16 @@ mod fake_venue_tests {
         let _env = set_l4_env(&fake_path, &dir, credential_id);
 
         apply_exit_fill(&store, credential_id, "bot_m0l4", SYMBOL_KEY, "1").await;
-        let driven = drive_due_obligations(&store).await.expect("drive the obligation");
+        let driven = drive_due_obligations(&store)
+            .await
+            .expect("drive the obligation");
         assert_eq!(driven, 1);
 
         assert_eq!(
-            obligation_state(&store, "pos_m0l4").await.as_ref().map(|(s, _, _)| s.as_str()),
+            obligation_state(&store, "pos_m0l4")
+                .await
+                .as_ref()
+                .map(|(s, _, _)| s.as_str()),
             Some("complete"),
             "fixture: the closed position's obligation completed"
         );
@@ -1620,7 +1914,10 @@ mod fake_venue_tests {
         let _env = set_l4_env(&fake_path, &dir, credential_id);
         apply_exit_fill(&store, credential_id, "bot_m0l4", SYMBOL_KEY, "1").await;
         assert_eq!(
-            obligation_state(&store, "pos_m0l4").await.as_ref().map(|(s, _, _)| s.as_str()),
+            obligation_state(&store, "pos_m0l4")
+                .await
+                .as_ref()
+                .map(|(s, _, _)| s.as_str()),
             Some("pending")
         );
         // 进程在驱动之前崩溃：义务只在库里。
@@ -1630,15 +1927,26 @@ mod fake_venue_tests {
         let reopened = Store::connect(&format!("sqlite://{}", db_path.display()))
             .await
             .expect("reopen the store after the crash");
-        let driven = drive_due_obligations(&reopened).await.expect("resume after restart");
-        assert_eq!(driven, 1, "the durable obligation must be resumed after restart");
+        let driven = drive_due_obligations(&reopened)
+            .await
+            .expect("resume after restart");
+        assert_eq!(
+            driven, 1,
+            "the durable obligation must be resumed after restart"
+        );
         assert_eq!(
             obligation_state(&reopened, "pos_m0l4").await,
             Some(("complete".to_string(), "truth_confirmed".to_string(), 1)),
             "the resumed drive must complete via truth"
         );
-        assert_eq!(fake_algo_status(&venue, 101).await, ("CANCELED".to_string(), 0));
-        assert_eq!(fake_order_status(&venue, 201).await, ("CANCELED".to_string(), 0));
+        assert_eq!(
+            fake_algo_status(&venue, 101).await,
+            ("CANCELED".to_string(), 0)
+        );
+        assert_eq!(
+            fake_order_status(&venue, 201).await,
+            ("CANCELED".to_string(), 0)
+        );
 
         venue.close().await;
         cleanup_dir(&reopened, &dir).await;
@@ -1659,7 +1967,9 @@ mod fake_venue_tests {
         let _env = set_l4_env(&fake_path, &dir, credential_id);
         apply_exit_fill(&store, credential_id, "bot_m0l4", SYMBOL_KEY, "1").await;
 
-        let driven = drive_due_obligations(&store).await.expect("drive the obligation");
+        let driven = drive_due_obligations(&store)
+            .await
+            .expect("drive the obligation");
         assert_eq!(driven, 1);
         assert_eq!(
             obligation_state(&store, "pos_m0l4").await,

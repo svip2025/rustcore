@@ -30,3 +30,21 @@ opening. Frozen v1 sets it false and records
 `data_quality_gate=skipped/wire_not_capable` until that production path is
 retired. Snapshot consistency errors fail closed for opening while the
 open-only rule never rejects closing.
+
+Round 2A's `risk_policy_testnet_v1` is an explicit exercise policy selected by
+an intent's `policy_version`; it never activates or replaces the default
+snapshot. The engine and replay evaluator admit its opening intents only for
+`run_mode=demo` on an explicitly resolved testnet venue. A matching live
+certification cannot authorize this exercise policy on another stage or venue.
+The exercise policy changes only minimum SL distance (0.15%), minimum RR
+(0.05), and cost-aware TP multiple (1). Fees/slippage assumptions, 0.5% risk
+budget, 15% pair exposure, and 1000 USDT position cap stay the same. S2/S3
+protection distances exercise execution and do not establish trading value.
+Out-of-range SL distances reject instead of being silently clamped.
+
+For this policy only, the engine retains the caller's exact typed SL string in
+its durable risk replay input and protection plan after checking its numeric
+identity and verifying that no stop clamp occurred. This avoids reserializing
+an already explicit price through f64 and shifting it by one exchange tick.
+It is a narrow 2A compatibility measure, not a full fixed-point sizing pipeline;
+multi-symbol/tick-size and full fixed-point conversion remain outside 2A.

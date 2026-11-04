@@ -48,3 +48,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.97.1
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked
+      # These socket-free exchange simulations use process-local L4 flags.
+      # Run the focused module by itself so unrelated tests cannot inherit them.
+      - run: cargo test --locked --features l4-fault-injection protection_cleanup::protection_cleanup_tests::fake_venue_tests -- --test-threads=1

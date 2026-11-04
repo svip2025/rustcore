@@ -3194,3 +3194,338 @@ async fn exchange_close_whose_normalized_quantity_is_not_the_full_position_is_re
     assert!(revision as u64 > request.expected_revision);
     h.cleanup().await;
 }
+
+// Round 2A fault boundaries use an external TLS peer to observe the real
+// signed POST and hold its response. The subprocess dies only after arrival;
+// no synthetic status write is used to manufacture an UNKNOWN outcome.
+async fn round2_kill_after_post(
+    venue: &TlsFakeVenue,
+    child: &mut std::process::Child,
+) -> crate::k04_fake_venue::RecordedRequest {
+    let started = std::time::Instant::now();
+    let post = loop {
+        if let Some(post) = venue
+            .requests()
+            .into_iter()
+            .find(|r| r.is("POST", "/fapi/v1/order"))
+        {
+            break post;
+        }
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "fault child exited before the exchange saw its POST"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "exchange POST boundary not reached"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "the ACK must still be withheld when SIGKILL is sent"
+    );
+    child.kill().unwrap();
+    let status = child.wait().unwrap();
+    assert_eq!(
+        std::os::unix::process::ExitStatusExt::signal(&status),
+        Some(9)
+    );
+    post
+}
+
+fn round2_submit_child(
+    path: &std::path::Path,
+    exchange: &std::path::Path,
+    mode: &str,
+) -> std::process::Child {
+    std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "position_close_exchange_tests::round2_mid_submit_child",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("ROUND2_FAULT_DATABASE", path)
+        .env("ROUND2_FAULT_PAYLOAD", exchange)
+        .env("ROUND2_FAULT_MODE", mode)
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn round2_f1_sigkill_after_entry_post_recovers_without_duplicate_and_restores_both_legs() {
+    use prost::Message;
+    let venue = TlsFakeVenue::start();
+    let env = exchange_env(&venue, Some(5_000));
+    venue.with_book(|book| {
+        book.positions = vec![venue_position("BTCUSDT", "0")];
+        book.allow_algo_submissions = true;
+        book.order_behaviors
+            .push_back(OrderBehavior::FillButHoldResponse { hold_ms: 10_000 });
+    });
+    let (store, path) = sqlite_store().await;
+    let now = crate::svc::now_ms();
+    sqlx::query("INSERT INTO risk_budget(credential_id,as_of_ms,equity_usdt,available_usdt,today_realized_pnl_usdt,today_realized_pnl_pct,drawdown_pct,total_exposure_pct,open_positions_count,group_exposure_json,kill_switch_level,remaining_credential_notional_usdt) VALUES(?,?,'10000','10000','0',0,0,0,0,'{}','none','5000')")
+        .bind(CRED).bind(now).execute(store.pool()).await.unwrap();
+    let req = p::ExecuteIntentsRequest {
+        credential_id: CRED.into(),
+        run_mode: "demo".into(),
+        schema_version: 1,
+        data_snapshot: Some(p::DataSnapshotDecision {
+            snapshot_id: format!("snap_{}", "a".repeat(32)),
+            quality_gate: "pass".into(),
+            allow_open: true,
+            allow_close: true,
+            created_at_ms: now,
+            schema_version: 1,
+        }),
+        intents: vec![p::OrderIntent {
+            bot_uid: "bot_round2_f1".into(),
+            run_id: "round2_f1".into(),
+            cycle_id: "round2_f1".into(),
+            idempotency_key: "round2_f1".into(),
+            client_order_id_short: "round2f1entry".into(),
+            exchange: "binance".into(),
+            market_kind: "futures".into(),
+            symbol_key: BTC.into(),
+            action: "open_long".into(),
+            order_type: "market".into(),
+            limit_price: String::new(),
+            reduce_only: false,
+            intent_id: "int_round2_f1".into(),
+            max_slippage_bps: 15,
+            protection: Some(p::Protection {
+                required: true,
+                stop_loss_price: "99".into(),
+                take_profit_price: "102.5".into(),
+                confirm_timeout_ms: 5000,
+                schema_version: 1,
+            }),
+            policy_version: risk_policy::TESTNET_POLICY_VERSION.into(),
+            valid_until_ms: now + 60_000,
+            config_hash: "c".repeat(64),
+            prompt_hash: format!("sha256:{}", "b".repeat(64)),
+            code_commit: "a".repeat(40),
+            schema_version: 1,
+        }],
+    };
+    let payload = path.with_extension("entry-request.bin");
+    std::fs::write(&payload, req.encode_to_vec()).unwrap();
+    store.pool().close().await;
+    let mut child = round2_submit_child(&path, &payload, "entry");
+    let post = round2_kill_after_post(&venue, &mut child).await;
+    let quantity = post.param("quantity").unwrap().to_string();
+    let client_id = post.param("newClientOrderId").unwrap().to_string();
+    assert_eq!(post.param("reduceOnly"), Some("false"));
+    // This is the simulated venue's actual fill, not a local engine write.
+    venue.with_book(|book| book.positions = vec![venue_position("BTCUSDT", &quantity)]);
+    let store = Store::connect(&format!("sqlite://{}", path.display()))
+        .await
+        .unwrap();
+    let entry = sqlx::query("SELECT status, COALESCE(exchange_order_id,'') exchange_id FROM engine_orders WHERE order_role='entry'").fetch_one(store.pool()).await.unwrap();
+    assert!(matches!(
+        entry.get::<String, _>("status").as_str(),
+        "pending_submit" | "submitted" | "unknown"
+    ));
+    assert_eq!(
+        entry.get::<String, _>("exchange_id"),
+        "",
+        "no ACK identity was persisted before the process died"
+    );
+    let engine = Engine::start(store).await;
+    engine.reconcile_now(CRED).await;
+    // Recovery calls the existing plan recovery path, and each leg requires
+    // the TLS peer's independent Algo truth before it can become confirmed.
+    for _ in 0..3 {
+        let count =
+            sqlx::query("SELECT COUNT(*) n FROM protection_orders WHERE verified_from_exchange=1")
+                .fetch_one(engine.store.pool())
+                .await
+                .unwrap()
+                .get::<i64, _>("n");
+        if count == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        engine.reconcile_now(CRED).await;
+    }
+    let confirmed =
+        sqlx::query("SELECT COUNT(*) n FROM protection_orders WHERE verified_from_exchange=1")
+            .fetch_one(engine.store.pool())
+            .await
+            .unwrap()
+            .get::<i64, _>("n");
+    assert_eq!(
+        confirmed, 2,
+        "a filled entry recovered without its response must have both protection legs confirmed"
+    );
+    let plans = sqlx::query("SELECT stop_loss_price FROM position_protection_plans")
+        .fetch_one(engine.store.pool())
+        .await
+        .unwrap();
+    assert_eq!(plans.get::<String, _>("stop_loss_price"), "99");
+    let result: Result<p::ExecuteIntentsResponse, _> = engine
+        .rpc("/execution_engine.v2.EngineExecution/ExecuteIntents", req)
+        .await;
+    let _ = result; // A duplicate may return its original ACK or an idempotency rejection.
+    let posts = venue
+        .requests()
+        .into_iter()
+        .filter(|r| r.is("POST", "/fapi/v1/order"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        posts.len(),
+        1,
+        "restart and duplicate input must not resend the opening order"
+    );
+    assert!(
+        venue
+            .requests()
+            .iter()
+            .any(|r| r.is("GET", "/fapi/v1/order")
+                && r.param("origClientOrderId") == Some(client_id.as_str())),
+        "recovery must resolve the original request identity"
+    );
+    let store = engine.stop().await;
+    store.pool().close().await;
+    drop(env);
+    std::fs::remove_file(payload).unwrap();
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn round2_f2_sigkill_after_close_post_recovers_original_fill_and_cleans_protection() {
+    let h = Harness::sqlite(
+        vec![OrderBehavior::FillButHoldResponse { hold_ms: 10_000 }],
+        Some(5_000),
+    )
+    .await;
+    let Harness {
+        venue,
+        _env,
+        engine,
+        database,
+    } = h;
+    let store = engine.stop().await;
+    store.pool().close().await;
+    let Database::Sqlite(path) = database else {
+        unreachable!()
+    };
+    let payload = path.with_extension("close-request.json");
+    let mut child = round2_submit_child(&path, &payload, "close");
+    let post = round2_kill_after_post(&venue, &mut child).await;
+    assert_eq!(post.param("reduceOnly"), Some("true"));
+    let input: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&payload).unwrap()).unwrap();
+    let request = p::ClosePositionRequest {
+        credential_id: CRED.into(),
+        position_id: POS.into(),
+        expected_revision: input["revision"].as_str().unwrap().parse().unwrap(),
+        expected_boot_id: input["boot"].as_str().unwrap().into(),
+        request_ref: input["ref"].as_str().unwrap().into(),
+        actor_member_id: 41,
+        schema_version: 1,
+    };
+    let store = Store::connect(&format!("sqlite://{}", path.display()))
+        .await
+        .unwrap();
+    assert_ne!(store.boot_id(), request.expected_boot_id);
+    let engine = Engine::start(store).await;
+    engine.reconcile_now(CRED).await;
+    let receipt = engine.receipt(&request).await;
+    let order = receipt.engine_order_id.as_deref().unwrap();
+    let (_, exchange_id, client_id) = close_order(&engine.store, order).await;
+    assert_eq!(client_id, post.param("newClientOrderId").unwrap());
+    // Deliver the recorded venue fill through the production user-stream sink
+    // after reconnect. REST truth alone cannot invent a per-trade fill row.
+    apply_trade_frame(
+        &engine.store,
+        exchange_id.parse().unwrap(),
+        &client_id,
+        "FILLED",
+        "1",
+        "1",
+        88_001,
+    )
+    .await;
+    crate::protection_cleanup::drive_due_obligations(&engine.store)
+        .await
+        .unwrap();
+    engine.reconcile_now(CRED).await;
+    let done = engine.receipt(&request).await;
+    assert_receipt(
+        &done,
+        "filled",
+        "EXCHANGE_FILLED",
+        "after real mid-submit SIGKILL",
+    );
+    assert_eq!(
+        protection(&done),
+        ("cleaned".into(), "PROTECTION_CLEANUP_CONFIRMED".into())
+    );
+    let h = Harness {
+        venue,
+        _env,
+        engine,
+        database: Database::Sqlite(path),
+    };
+    assert_eq!(
+        h.order_posts().len(),
+        1,
+        "restart never resubmits the close"
+    );
+    assert_eq!(h.algo_status(SL_ALGO), "CANCELED");
+    assert_eq!(h.algo_status(TP_ALGO), "CANCELED");
+    std::fs::remove_file(payload).unwrap();
+    h.cleanup().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "subprocess helper invoked by both round2 F1/F2 SIGKILL parent tests"]
+async fn round2_mid_submit_child() {
+    use prost::Message;
+    sqlx::any::install_default_drivers();
+    let path = std::env::var("ROUND2_FAULT_DATABASE").unwrap();
+    let payload = std::env::var("ROUND2_FAULT_PAYLOAD").unwrap();
+    let mode = std::env::var("ROUND2_FAULT_MODE").unwrap();
+    let store = Store::connect(&format!("sqlite://{path}")).await.unwrap();
+    let now = crate::svc::now_ms();
+    let cycle = crate::fill_replay::begin_recovery_cycle(
+        &store,
+        CRED,
+        crate::fill_replay::RecoveryTrigger::Startup,
+        now - 2,
+    )
+    .await
+    .unwrap();
+    crate::fill_replay::finalize_recovery_readiness(
+        &store,
+        CRED,
+        crate::fill_replay::RecoveryPhaseResult::Succeeded,
+        crate::fill_replay::RecoveryPhaseResult::Succeeded,
+        crate::fill_replay::RecoveryPhaseResult::Succeeded,
+        cycle,
+        now - 1,
+    )
+    .await
+    .unwrap();
+    let engine = Engine::start(store).await;
+    if mode == "entry" {
+        let req =
+            p::ExecuteIntentsRequest::decode(std::fs::read(payload).unwrap().as_slice()).unwrap();
+        let result: Result<p::ExecuteIntentsResponse, _> = engine
+            .rpc("/execution_engine.v2.EngineExecution/ExecuteIntents", req)
+            .await;
+        panic!("entry peer should withhold its ACK until the parent SIGKILL: {result:?}");
+    } else {
+        let req = engine.close_request(CRED, POS).await;
+        std::fs::write(payload,serde_json::to_vec(&serde_json::json!({"revision":req.expected_revision.to_string(),"boot":req.expected_boot_id,"ref":req.request_ref})).unwrap()).unwrap();
+        let result = engine.close(&req).await;
+        panic!("close peer should withhold its ACK until the parent SIGKILL: {result:?}");
+    }
+}

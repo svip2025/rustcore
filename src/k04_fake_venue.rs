@@ -54,6 +54,8 @@ pub(crate) struct FakeVenueBook {
     /// WO-M1：`POST /fapi/v1/order` 的逐单脚本（先进先出；空则立即成交，
     /// 即历史默认行为）。
     pub order_behaviors: VecDeque<OrderBehavior>,
+    /// Round 2A process recovery fixture: allow new conditional SL/TP orders.
+    pub allow_algo_submissions: bool,
     /// WO-M7：回环 WS 只发送这份冻结 kline 帧。
     pub kline_frame: Option<String>,
     pub requests: Vec<RecordedRequest>,
@@ -317,6 +319,29 @@ fn respond_book(
             200,
             json!({"rateLimits":[{"rateLimitType":"REQUEST_WEIGHT","interval":"MINUTE","intervalNum":1,"limit":1000000}],"symbols":[]}),
         ),
+        ("POST", "/fapi/v1/algoOrder") if book.allow_algo_submissions => {
+            let client_id = params.get("clientAlgoId").cloned().unwrap_or_default();
+            if book
+                .open_algos
+                .iter()
+                .chain(book.algo_history.iter())
+                .any(|algo| {
+                    algo.get("clientAlgoId").and_then(Value::as_str) == Some(client_id.as_str())
+                })
+            {
+                return venue_error(-4116, "duplicate clientAlgoId");
+            }
+            let algo = json!({
+                "algoId": 1_100_000 + book.requests.len() as i64,
+                "clientAlgoId": client_id, "algoStatus": "NEW", "algoType": "CONDITIONAL",
+                "symbol": params.get("symbol"), "side": params.get("side"),
+                "orderType": params.get("type"), "triggerPrice": params.get("triggerPrice"),
+                "quantity": params.get("quantity"), "reduceOnly": params.get("reduceOnly"),
+                "closePosition": params.get("closePosition"), "updateTime": crate::svc::now_ms(),
+            });
+            book.open_algos.push(algo.clone());
+            (200, algo)
+        }
         ("GET", "/fapi/v1/openOrders") => (200, by_symbol(&book.open_orders)),
         ("GET", "/fapi/v1/openAlgoOrders") => (200, by_symbol(&book.open_algos)),
         ("GET", "/fapi/v2/positionRisk") => (200, Value::Array(book.positions.clone())),
