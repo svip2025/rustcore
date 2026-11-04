@@ -303,7 +303,14 @@ impl MarketDataManager {
 
         self.ensure_task(key, move || {
             tokio::spawn(async move {
+                let mut reconnect = false;
                 loop {
+                    if let Err(error) = crate::round2_diagnostics::record_connection_attempt(&store, &credential_id, "MARKET_DATA", reconnect, now_ms()).await {
+                        tracing::warn!(%error, "market websocket diagnostic write failed; retrying before connecting");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                    reconnect = true;
                     if let Err(e) =
                         run_kline_once(&credential_id, store.clone(), &symbol_key, &timeframe).await
                     {

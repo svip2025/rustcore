@@ -1895,6 +1895,8 @@ where
     };
     // WO-M1：仓位读数的起点。早于平仓单落库的读数不能证明「平仓之后」归零。
     let position_read_started_ms = now_ms();
+    #[cfg(test)]
+    position_read_test_control::pause_after_start(&store, position_read_started_ms).await;
     let account = read_account_truth(account_source, client, &coverage).await?;
     let positions_json = account.positions;
     if !positions_json.is_array() {
@@ -3502,6 +3504,74 @@ pub(crate) async fn revalidate_legacy_credential_reconcile_diff(
         .await
         .context("commit credential reconcile diff revalidation")?;
     Ok(written)
+}
+
+// Only the scheduling point is controlled: production still captures the
+// actual read-start timestamp and executes every REST/database/settlement step.
+// Normal builds contain neither the registry nor this pause.
+#[cfg(test)]
+pub(crate) mod position_read_test_control {
+    use crate::store::Store;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicI64, Ordering};
+    use std::sync::{Arc, Mutex, OnceLock, Weak};
+
+    #[derive(Default)]
+    pub(crate) struct Barrier {
+        started_at_ms: AtomicI64,
+        reached: tokio::sync::Notify,
+        resume: tokio::sync::Notify,
+    }
+    fn registry() -> &'static Mutex<HashMap<usize, Weak<Barrier>>> {
+        static REGISTRY: OnceLock<Mutex<HashMap<usize, Weak<Barrier>>>> = OnceLock::new();
+        REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+    fn store_key(store: &Store) -> usize {
+        std::ptr::from_ref(store.pool()) as usize
+    }
+    pub(crate) fn arm(store: &Store) -> Arc<Barrier> {
+        let barrier = Arc::new(Barrier::default());
+        registry()
+            .lock()
+            .unwrap()
+            .insert(store_key(store), Arc::downgrade(&barrier));
+        barrier
+    }
+    impl Barrier {
+        pub(crate) async fn started(&self) -> i64 {
+            tokio::time::timeout(std::time::Duration::from_secs(30), async {
+                loop {
+                    let started = self.started_at_ms.load(Ordering::SeqCst);
+                    if started > 0 {
+                        return started;
+                    }
+                    self.reached.notified().await;
+                }
+            })
+            .await
+            .expect("the actual position read-start boundary must be reached")
+        }
+        pub(crate) fn release(&self) {
+            self.resume.notify_one();
+        }
+    }
+    pub(super) async fn pause_after_start(store: &Store, started_at_ms: i64) {
+        let barrier = registry()
+            .lock()
+            .unwrap()
+            .remove(&store_key(store))
+            .and_then(|weak| weak.upgrade());
+        if let Some(barrier) = barrier {
+            barrier.started_at_ms.store(started_at_ms, Ordering::SeqCst);
+            barrier.reached.notify_one();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                barrier.resume.notified(),
+            )
+            .await
+            .expect("the test must release its position read-start barrier");
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1245,3 +1245,103 @@ fn cost_aware_tp_observed_intent_requested_20_capped_10_now_passes() {
     let notional: f64 = final_notional_usdt.parse().unwrap();
     assert!(notional <= 1000.0 && notional > 900.0, "{notional}");
 }
+
+// Round 2A keeps the factory policy unchanged; these exercise-only distances
+// and economics are an explicitly named testnet policy, not strategy evidence.
+fn round2_input(short: bool, stop_pct: f64, tp_pct: f64) -> Input {
+    let mut input = base_input();
+    input.policy = testnet_policy();
+    input.policy_hash = policy_hash(&input.policy);
+    input.intent.action = if short {
+        Action::OpenShort
+    } else {
+        Action::OpenLong
+    };
+    input.intent.requested_leverage = 1;
+    input.intent.entry_ref_price = Some(100.0);
+    input.intent.stop_loss_price = Some(if short {
+        100.0 * (1.0 + stop_pct)
+    } else {
+        100.0 * (1.0 - stop_pct)
+    });
+    input.intent.take_profit_price = Some(if short {
+        100.0 * (1.0 - tp_pct)
+    } else {
+        100.0 * (1.0 + tp_pct)
+    });
+    let stage = input.stage_certification.as_mut().unwrap();
+    stage.policy_version = TESTNET_POLICY_VERSION.into();
+    stage.requested_stage = "demo".into();
+    stage.venue_is_testnet = true;
+    input
+}
+
+#[test]
+fn round2_s2_s3_testnet_distances_are_not_clamped_and_caps_remain() {
+    let factory_before = policy_hash(&factory_policy());
+    assert_eq!(policy_hash(&testnet_policy()), TESTNET_POLICY_HASH.trim());
+    for short in [false, true] {
+        for (sl, tp) in [(0.0015, 0.03), (0.03, 0.0015)] {
+            let input = round2_input(short, sl, tp);
+            let verdict = evaluate(&input);
+            assert_ne!(
+                verdict.decision,
+                Decision::Reject,
+                "{}",
+                verdict.rules_json()
+            );
+            assert_eq!(
+                rule(&verdict, "stop_distance_clamp").result,
+                RuleOutcome::Pass
+            );
+            let sizing = verdict.sizing.unwrap();
+            assert!(!sizing
+                .capped_by()
+                .iter()
+                .any(|cap| cap == "stop_distance_clamp"));
+            let notional = sizing.final_notional_usdt().parse::<f64>().unwrap();
+            assert!(
+                notional <= 1000.0
+                    && notional <= 0.15 * input.account.as_ref().unwrap().equity_usdt
+            );
+            assert_eq!(input.policy.per_trade.risk_per_trade_pct, 0.005);
+            assert_eq!(input.policy.portfolio.max_position_notional_usdt, 1000.0);
+            assert_eq!(input.policy.portfolio.max_pair_exposure_pct, 0.15);
+        }
+    }
+    assert_eq!(policy_hash(&factory_policy()), factory_before);
+    assert_eq!(factory_before, FACTORY_POLICY_HASH.trim());
+    assert_eq!(factory_policy().per_trade.min_stop_distance_pct, 0.008);
+    assert_eq!(factory_policy().per_trade.min_rr, 2.0);
+    assert_eq!(factory_policy().per_trade.cost_aware_tp_multiple, 2.0);
+}
+
+#[test]
+fn round2_testnet_policy_cannot_be_used_on_another_venue_or_stage_even_with_certification() {
+    for (stage_name, testnet) in [
+        ("paper", true),
+        ("demo", false),
+        ("live_small", true),
+        ("live", false),
+    ] {
+        let mut input = round2_input(false, 0.03, 0.0015);
+        let stage = input.stage_certification.as_mut().unwrap();
+        stage.requested_stage = stage_name.into();
+        stage.venue_is_testnet = testnet;
+        let mut cert = matching_certification();
+        cert.policy_version = TESTNET_POLICY_VERSION.into();
+        stage.certifications.push(cert);
+        assert_code(input, "TESTNET_POLICY_FORBIDDEN");
+    }
+    let mut input = round2_input(false, 0.03, 0.0015);
+    input.stage_certification.as_mut().unwrap().policy_version = "risk_policy_v3".into();
+    assert_code(input, "TESTNET_POLICY_FORBIDDEN");
+}
+
+#[test]
+fn round2_testnet_out_of_range_stop_is_rejected_instead_of_silently_rewritten() {
+    for distance in [0.0001, 0.08] {
+        let input = round2_input(false, distance, 0.03);
+        assert_code(input, "TESTNET_STOP_DISTANCE_OUT_OF_RANGE");
+    }
+}

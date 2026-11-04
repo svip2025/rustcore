@@ -303,6 +303,8 @@ struct RiskReplayInput {
     input: Input,
     #[serde(default)]
     entry_market_reference: Option<EntryMarketReference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    exact_testnet_stop_loss_price: Option<String>,
     policy_open_guard: Option<PolicyOpenGuard>,
     #[serde(default)]
     invalid_persisted_kill_switch_guard: Option<InvalidPersistedKillSwitchGuard>,
@@ -366,6 +368,31 @@ async fn load_fill_recovery_open_guard(
 
 async fn load_policy(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    requested_version: Option<&str>,
+) -> Result<(Policy, String, Option<PolicyOpenGuard>), Status> {
+    // Always validate the activated/default authority first. Selecting an
+    // exercise policy must not bypass a persisted policy-integrity failure.
+    let (policy, hash, guard) = load_activated_policy(tx).await?;
+    if requested_version == Some(risk_policy::TESTNET_POLICY_VERSION) {
+        let exercise = apply_runtime_limits(risk_policy::testnet_policy());
+        return Ok((exercise.clone(), risk_policy::policy_hash(&exercise), guard));
+    }
+    if policy.policy_version == risk_policy::TESTNET_POLICY_VERSION {
+        return Ok((
+            policy,
+            hash,
+            Some(PolicyOpenGuard {
+                rule: "testnet_policy_selection".into(),
+                reason_code: "TESTNET_POLICY_NOT_SELECTED".into(),
+                detail: "exercise policy requires explicit intent policy_version".into(),
+            }),
+        ));
+    }
+    Ok((policy, hash, guard))
+}
+
+async fn load_activated_policy(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
 ) -> Result<(Policy, String, Option<PolicyOpenGuard>), Status> {
     let row = sqlx::query(
         r#"
@@ -410,6 +437,14 @@ async fn load_policy(
                     computed_hash,
                     risk_policy::FACTORY_POLICY_HASH.trim()
                 ),
+            })
+        } else if policy.policy_version == risk_policy::TESTNET_POLICY_VERSION
+            && computed_hash != risk_policy::TESTNET_POLICY_HASH.trim()
+        {
+            Some(PolicyOpenGuard {
+                rule: "testnet_policy_integrity".into(),
+                reason_code: "POLICY_HASH_MISMATCH".into(),
+                detail: "persisted exercise policy differs from its fixed definition".into(),
             })
         } else {
             None
@@ -1010,7 +1045,8 @@ pub(crate) async fn evaluate_v1(
 ) -> Result<(RiskVerdict, String, String), Status> {
     // Step 1: all persisted evaluator facts are loaded from this transaction
     // snapshot before invoking the pure function.
-    let (policy, policy_hash, policy_open_guard) = load_policy(tx).await?;
+    let (policy, policy_hash, policy_open_guard) =
+        load_policy(tx, wire.map(|context| context.policy_version.as_str())).await?;
     let fill_recovery_open_guard = load_fill_recovery_open_guard(
         tx,
         credential_id,
@@ -1230,6 +1266,10 @@ pub(crate) async fn evaluate_v1(
     let reservation_cap = format_decimal(policy.portfolio.max_credential_notional_usdt);
     let replay_input = RiskReplayInput {
         entry_market_reference: entry_market_reference.cloned(),
+        exact_testnet_stop_loss_price: wire
+            .filter(|context| context.policy_version == "risk_policy_testnet_v1")
+            .and_then(|context| context.protection.as_ref())
+            .map(|protection| protection.stop_loss_price.clone()),
         input: Input {
             policy,
             policy_hash,
@@ -1332,6 +1372,32 @@ fn evaluate_replay(replay: &RiskReplayInput) -> RiskVerdict {
         verdict
             .rules
             .retain(|rule| rule.rule != "kill_switch_level");
+    }
+    if replay.input.policy.policy_version == risk_policy::TESTNET_POLICY_VERSION {
+        if let Some(exact) = replay.exact_testnet_stop_loss_price.as_ref() {
+            let numeric = parse_decimal(exact);
+            let no_clamp = !verdict.sizing.as_ref().is_some_and(|sizing| {
+                sizing
+                    .capped_by()
+                    .iter()
+                    .any(|cap| cap == "stop_distance_clamp")
+            });
+            if numeric.is_some() && numeric == replay.input.intent.stop_loss_price && no_clamp {
+                if let Some(risk_policy::Sizing::RiskBudget {
+                    stop_loss_price, ..
+                }) = verdict.sizing.as_mut()
+                {
+                    *stop_loss_price = exact.clone();
+                }
+            } else {
+                verdict = rejected_verdict(
+                    verdict,
+                    "testnet_stop_price_identity",
+                    "TESTNET_PROTECTION_INPUT_MISMATCH",
+                    "exact typed stop does not match the evaluated stop",
+                );
+            }
+        }
     }
     if let Some(reference) = replay
         .entry_market_reference
@@ -1888,6 +1954,7 @@ mod credential_degrade_guard_tests {
 
 #[cfg(test)]
 mod invalid_persisted_kill_switch_guard_tests {
+    use sqlx::Row;
     use std::sync::Once;
 
     use risk_policy::{
@@ -1983,6 +2050,7 @@ mod invalid_persisted_kill_switch_guard_tests {
         RiskReplayInput {
             input,
             entry_market_reference: None,
+            exact_testnet_stop_loss_price: None,
             policy_open_guard: None,
             invalid_persisted_kill_switch_guard: Some(InvalidPersistedKillSwitchGuard {
                 rule: INVALID_PERSISTED_KILL_SWITCH_RULE.to_string(),
@@ -1999,6 +2067,71 @@ mod invalid_persisted_kill_switch_guard_tests {
             post_evaluation_rule: None,
             post_evaluation_reject: None,
         }
+    }
+
+    #[tokio::test]
+    async fn round2_explicit_testnet_policy_is_selected_without_activating_the_default() {
+        INSTALL_DRIVERS.call_once(sqlx::any::install_default_drivers);
+        let path = std::env::temp_dir().join(format!("round2-policy-{}.sqlite", ulid::Ulid::new()));
+        let store = Store::connect(&format!("sqlite://{}", path.display()))
+            .await
+            .unwrap();
+        let mut tx = store.pool().begin().await.unwrap();
+        let (selected, _, guard) = super::load_policy(&mut tx, Some("risk_policy_testnet_v1"))
+            .await
+            .unwrap();
+        assert_eq!(selected.policy_version, "risk_policy_testnet_v1");
+        assert!(guard.is_none());
+        let (default, hash, _) = super::load_policy(&mut tx, Some("risk_policy_v3"))
+            .await
+            .unwrap();
+        assert_eq!(default.policy_version, "risk_policy_v3");
+        assert_eq!(hash, risk_policy::FACTORY_POLICY_HASH.trim());
+        let count = sqlx::query("SELECT COUNT(*) AS n FROM risk_policies_snapshot")
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap()
+            .get::<i64, _>("n");
+        assert_eq!(
+            count, 0,
+            "per-intent test policy must not activate or persist a replacement default"
+        );
+        tx.rollback().await.unwrap();
+        store.pool().close().await;
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn round2_exact_testnet_stop_survives_replay_without_a_float_tail_tick() {
+        let mut replay = replay_for(Action::OpenLong, false, OrderRole::Entry);
+        replay.invalid_persisted_kill_switch_guard = None;
+        replay.input.kill_switch = Some(risk_policy::KillSwitch {
+            level: "none".into(),
+            scope_key: "global".into(),
+        });
+        replay.input.policy = risk_policy::testnet_policy();
+        replay.input.policy_hash = risk_policy::policy_hash(&replay.input.policy);
+        replay.input.intent.entry_ref_price = Some(77762.5);
+        replay.input.intent.stop_loss_price = Some(76984.8);
+        replay.input.intent.take_profit_price = Some(80000.0);
+        replay.exact_testnet_stop_loss_price = Some("76984.8".into());
+        let stage = replay.input.stage_certification.as_mut().unwrap();
+        stage.requested_stage = "demo".into();
+        stage.venue_is_testnet = true;
+        stage.policy_version = "risk_policy_testnet_v1".into();
+        let encoded = serde_json::to_string(&replay).unwrap();
+        let decoded = serde_json::from_str(&encoded).unwrap();
+        let verdict = evaluate_replay(&decoded);
+        assert_ne!(
+            verdict.decision,
+            Decision::Reject,
+            "{}",
+            verdict.rules_json()
+        );
+        assert_eq!(
+            verdict.sizing.unwrap().effective_stop_loss_price(),
+            Some("76984.8")
+        );
     }
 
     #[test]

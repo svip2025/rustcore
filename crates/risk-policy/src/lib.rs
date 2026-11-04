@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 pub const EVALUATOR_VERSION: &str = "risk-policy@1.1.0";
 pub const FACTORY_POLICY_JSON: &str = include_str!("../policy/risk_policy_v3.json");
 pub const FACTORY_POLICY_HASH: &str = include_str!("../policy/risk_policy_v3.sha256");
+/// Explicit offline/testnet exercise policy. Never the factory/default policy.
+pub const TESTNET_POLICY_VERSION: &str = "risk_policy_testnet_v1";
+pub const TESTNET_POLICY_JSON: &str = include_str!("../policy/risk_policy_testnet_v1.json");
+pub const TESTNET_POLICY_HASH: &str = include_str!("../policy/risk_policy_testnet_v1.sha256");
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Policy {
@@ -422,6 +426,10 @@ pub fn factory_policy() -> Policy {
     serde_json::from_str(FACTORY_POLICY_JSON).expect("factory policy JSON is valid")
 }
 
+pub fn testnet_policy() -> Policy {
+    serde_json::from_str(TESTNET_POLICY_JSON).expect("testnet exercise policy JSON is valid")
+}
+
 pub fn policy_hash(policy: &Policy) -> String {
     let value = serde_json::to_value(policy).expect("policy serializes");
     format!("sha256:{}", sha256_hex(&canonical_json(&value)))
@@ -543,6 +551,17 @@ fn stage_certified_rule(input: &Input) -> RuleResult {
         );
     };
     let requested = stage.requested_stage.trim().to_ascii_lowercase();
+    if input.policy.policy_version == TESTNET_POLICY_VERSION
+        && (requested != "demo"
+            || !stage.venue_is_testnet
+            || stage.policy_version != TESTNET_POLICY_VERSION
+            || input.intent.symbol_key != "binance|futures|BTC|USDT|USDT")
+    {
+        return reject(
+            "stage_certified", "TESTNET_POLICY_FORBIDDEN",
+            "exercise policy requires explicit policy_version, demo stage, testnet venue, and BTCUSDT",
+        );
+    }
     if requested == "paper" {
         return skipped("stage_certified", "paper_does_not_require_certification");
     }
@@ -771,7 +790,16 @@ pub fn evaluate(input: &Input) -> RiskVerdict {
                 policy.per_trade.max_stop_distance_pct,
             );
             stop_distance = Some(clamped);
-            if (raw - clamped).abs() > 1e-12 {
+            if (raw - clamped).abs() > 1e-12 && policy.policy_version == TESTNET_POLICY_VERSION {
+                // An execution scenario is an input, not something the risk
+                // evaluator may silently rewrite to make the test pass.
+                stop_distance = Some(raw);
+                rules.push(reject(
+                    "stop_distance_clamp",
+                    "TESTNET_STOP_DISTANCE_OUT_OF_RANGE",
+                    format!("requested_distance={raw:.8}; explicit scenario parameters preserved"),
+                ));
+            } else if (raw - clamped).abs() > 1e-12 {
                 let adjusted = match input.intent.action {
                     Action::OpenLong => entry * (1.0 - clamped),
                     Action::OpenShort => entry * (1.0 + clamped),

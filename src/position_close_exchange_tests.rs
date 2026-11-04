@@ -93,6 +93,15 @@ fn exchange_env_with_venues(
     credentials: &[(&str, crate::venue::Venue)],
 ) -> ExchangeEnv {
     let serial = crate::binance_futures::tests::env_serial_guard();
+    exchange_env_with_venues_locked(venue, http_timeout_ms, credentials, serial)
+}
+
+fn exchange_env_with_venues_locked(
+    venue: &TlsFakeVenue,
+    http_timeout_ms: Option<u64>,
+    credentials: &[(&str, crate::venue::Venue)],
+    serial: std::sync::MutexGuard<'static, ()>,
+) -> ExchangeEnv {
     let direct = credentials
         .iter()
         .any(|(_, venue)| *venue == crate::venue::Venue::Mainnet);
@@ -125,6 +134,13 @@ fn exchange_env_with_venues(
         ),
         EnvGuard::set("ENGINE_LIVE_ENABLED", "false"),
         EnvGuard::set("ENGINE_STAGE_MAX", "demo"),
+        // Each TLS fake is an independent venue/IP budget domain. Keep the
+        // production shared governor within that fixture (including child
+        // processes), but never inherit a prior fake's bucket or meter.
+        EnvGuard::set(
+            "BINANCE_EGRESS_ROUTE_ID",
+            &format!("wom1-fixture-{}", ulid::Ulid::new()),
+        ),
         EnvGuard::set("RUSTCORE_BINANCE_WEIGHT_PER_SEC", "100000"),
         EnvGuard::set("RUSTCORE_BINANCE_WEIGHT_BURST", "100000"),
         EnvGuard::set(
@@ -156,16 +172,6 @@ pub(crate) struct Engine {
     addr: std::net::SocketAddr,
     task: tokio::task::JoinHandle<()>,
     pub(crate) market_data: crate::market_data::MarketDataManager,
-}
-
-/// 引擎时间观领先墙钟固定毫秒数（生产 `Clock` 注入缝）：派发事务写下的
-/// 原单 `created_at_ms` 落在未来，而对账按墙钟取 positionRisk 读数时刻。
-struct AheadClock(i64);
-
-impl crate::svc::Clock for AheadClock {
-    fn now_ms(&self) -> i64 {
-        crate::svc::now_ms() + self.0
-    }
 }
 
 impl Engine {
@@ -400,24 +406,6 @@ impl Harness {
         let env = exchange_env_with_venues(&venue, None, credentials);
         let (store, path) = sqlite_store().await;
         Self::finish(venue, env, store, Database::Sqlite(path), vec![], None).await
-    }
-
-    /// 同一套夹具，但引擎时间观领先墙钟 `ahead_ms`（见 [`AheadClock`]）。
-    async fn sqlite_with_engine_ahead(behaviors: Vec<OrderBehavior>, ahead_ms: i64) -> Self {
-        let venue = TlsFakeVenue::start();
-        let env = exchange_env(&venue, None);
-        let (store, path) = sqlite_store().await;
-        let clock: std::sync::Arc<dyn crate::svc::Clock> =
-            std::sync::Arc::new(AheadClock(ahead_ms));
-        Self::finish(
-            venue,
-            env,
-            store,
-            Database::Sqlite(path),
-            behaviors,
-            Some(clock),
-        )
-        .await
     }
 
     async fn mysql(test: &str, behaviors: Vec<OrderBehavior>) -> Option<Self> {
@@ -1508,59 +1496,72 @@ async fn mysql_reservation_release_concurrent_sweeps_subtract_only_once() {
     h.cleanup().await;
 }
 
-/// M1 评审 P2 #1：终结判据里「同轮 positionRisk 读数晚于原单落库」这一合取项。
-/// 其余合取项全部成立（原单 filled、累计成交 = 目标、本地仓位 closed/0、
-/// 交易所该 scope 精确归零且读数覆盖该 symbol），只有读数时刻早于原单
-/// `created_at_ms`：这样的读数证明不了「平仓之后」归零，绝不终结、fence
-/// 继续挂着。引擎时间观经生产 `Clock` 缝领先墙钟，原单落库时刻因此落在
-/// 未来；对账走真实 ReconcileNow（读数时刻按墙钟）。读数一旦晚于原单，
-/// 同一份真值立即终结——正向对照证明拦住它的正是这一项。
+/// The actual read-start timestamp must be strictly newer than the close
+/// order before a flat observation can finalize it. A one-shot test barrier
+/// constructs the stale interleaving without a wall-clock race: the read starts,
+/// then the real close RPC commits and fills, then the old round continues.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn exchange_close_never_finalizes_from_a_position_read_older_than_the_close_order() {
-    const ENGINE_AHEAD_MS: i64 = 8_000;
-    let h = Harness::sqlite_with_engine_ahead(vec![OrderBehavior::FillNow], ENGINE_AHEAD_MS).await;
+    use crate::reconcile::position_read_test_control;
+    let h = Harness::sqlite(vec![OrderBehavior::FillNow], None).await;
     let store = h.store();
     let request = h.engine.close_request(CRED, POS).await;
-    let first = h.engine.close(&request).await;
-    assert_receipt(&first, "working", "EXCHANGE_WORKING", "after submit");
-    let order_id = first.engine_order_id.clone().unwrap();
-    let (_, exchange_id, client_id) = close_order(store, &order_id).await;
-    let order_created_at_ms: i64 =
-        sqlx::query("SELECT created_at_ms FROM engine_orders WHERE engine_order_id=?")
-            .bind(&order_id)
-            .fetch_one(store.pool())
-            .await
-            .expect("close order creation time")
-            .get("created_at_ms");
-    apply_trade_frame(
-        store,
-        exchange_id.parse().expect("exchange order id"),
-        &client_id,
-        "FILLED",
-        "1",
-        "1",
-        56_001,
-    )
-    .await;
-    // 除读数时刻外的每一项都已成立。
-    assert_eq!(close_order(store, &order_id).await.0, "filled");
-    let local = position_row(store, POS).await;
-    assert_eq!((local.0.as_str(), local.1.as_str()), ("closed", "0"));
-    assert_eq!(h.venue_amount("BTCUSDT"), "0");
-
-    h.engine.reconcile_now(CRED).await;
-    let read_bound_ms = crate::svc::now_ms();
+    let old_read = position_read_test_control::arm(store);
+    let close_after_read_start = async {
+        let read_started_at_ms = old_read.started().await;
+        // Wait for the required ordering, not for an assumed machine speed.
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while crate::svc::now_ms() <= read_started_at_ms {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("wall clock must advance beyond the captured read start");
+        let first = h.engine.close(&request).await;
+        assert_receipt(&first, "working", "EXCHANGE_WORKING", "after submit");
+        let order_id = first.engine_order_id.clone().unwrap();
+        let (_, exchange_id, client_id) = close_order(store, &order_id).await;
+        let order_created_at_ms =
+            sqlx::query("SELECT created_at_ms FROM engine_orders WHERE engine_order_id=?")
+                .bind(&order_id)
+                .fetch_one(store.pool())
+                .await
+                .unwrap()
+                .get::<i64, _>("created_at_ms");
+        assert!(
+            read_started_at_ms < order_created_at_ms,
+            "actual read start must predate the real close creation"
+        );
+        apply_trade_frame(
+            store,
+            exchange_id.parse().unwrap(),
+            &client_id,
+            "FILLED",
+            "1",
+            "1",
+            56_001,
+        )
+        .await;
+        assert_eq!(close_order(store, &order_id).await.0, "filled");
+        let local = position_row(store, POS).await;
+        assert_eq!((local.0.as_str(), local.1.as_str()), ("closed", "0"));
+        assert_eq!(h.venue_amount("BTCUSDT"), "0");
+        old_read.release();
+        (read_started_at_ms, order_created_at_ms)
+    };
+    let (_, (old_read_started_at_ms, order_created_at_ms)) =
+        tokio::join!(h.engine.reconcile_now(CRED), close_after_read_start);
+    let old_round_ended_at_ms = crate::svc::now_ms();
     assert!(
-        read_bound_ms < order_created_at_ms,
-        "precondition: the whole ReconcileNow (its positionRisk read included) must predate \
-         the close order's creation ({read_bound_ms} >= {order_created_at_ms})"
+        order_created_at_ms <= old_round_ended_at_ms,
+        "the close must complete inside the older reconcile round"
     );
     let stale = h.engine.receipt(&request).await;
     assert_receipt(
         &stale,
         "working",
         "EXCHANGE_FILL_CONFIRMING",
-        "flat truth read before the close order existed",
+        "flat truth from a round that started before the close",
     );
     assert_eq!(
         stale.execution_outcome.as_ref().map(|o| o.status.as_str()),
@@ -1568,19 +1569,30 @@ async fn exchange_close_never_finalizes_from_a_position_read_older_than_the_clos
     );
     assert!(
         fence(store, &request.request_ref).await,
-        "a pre-order read never releases the fence"
+        "an older read never releases the fence"
     );
     assert!(exchange_entry_fenced(store, BTC).await);
 
-    // 正向对照：读数晚于原单落库之后，同一份真值终结。
-    while crate::svc::now_ms() <= order_created_at_ms + 50 {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    h.engine.reconcile_now(CRED).await;
+    let fresh_read = position_read_test_control::arm(store);
+    let confirm_fresh_start = async {
+        let started_at_ms = fresh_read.started().await;
+        assert!(
+            started_at_ms > order_created_at_ms,
+            "positive control must use an actual newer read"
+        );
+        fresh_read.release();
+        started_at_ms
+    };
+    let (_, fresh_read_started_at_ms) =
+        tokio::join!(h.engine.reconcile_now(CRED), confirm_fresh_start);
     let done = h.engine.receipt(&request).await;
     assert_receipt(&done, "filled", "EXCHANGE_FILLED", "read after the order");
     assert!(!fence(store, &request.request_ref).await);
     assert_eq!(h.order_posts().len(), 1);
+    println!(
+        "{}",
+        serde_json::json!({"actual_old_read_started_at_ms":old_read_started_at_ms,"close_created_at_ms":order_created_at_ms,"old_round_ended_at_ms":old_round_ended_at_ms,"actual_fresh_read_started_at_ms":fresh_read_started_at_ms,"old_round_kept_unknown_and_fence":true,"fresh_round_finalized":true})
+    );
     h.cleanup().await;
 }
 
@@ -2688,6 +2700,70 @@ fn vector_receipt(r: &p::ClosePositionResponse) -> serde_json::Value {
     })
 }
 
+/// A previous fixture's shared IP bucket must not become this fake venue's
+/// limiter. Keeping the production shared governor inside each fixture is
+/// essential: this case poisons a distinct inherited scope, not a global
+/// default used by other tests. No queue timeout or rate limit is relaxed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn round2_close_fixture_isolates_a_prior_egress_bucket_without_resetting_it() {
+    let serial = crate::binance_futures::tests::env_serial_guard();
+    let inherited_route = format!("wom1-inherited-{}", ulid::Ulid::new());
+    let inherited_env = EnvGuard::set("BINANCE_EGRESS_ROUTE_ID", &inherited_route);
+    let inherited_scope = crate::binance_futures::egress_scope_for_transport(
+        Some(crate::venue::Venue::Testnet),
+        crate::venue::Venue::Testnet.rest_base_url(),
+    )
+    .unwrap();
+    let prior_limiter = crate::rate_limiter::CredentialRateLimiter::shared(
+        crate::rate_limiter::TokenBucketConfig::for_test(100.0, 0.0),
+    );
+    prior_limiter.set_stored_tokens(&inherited_scope, 0.0).await;
+    let venue = TlsFakeVenue::start();
+    venue.with_book(|book| book.positions = vec![venue_position("BTCUSDT", "0")]);
+    let mut env = exchange_env_with_venues_locked(
+        &venue,
+        None,
+        &[
+            (CRED, crate::venue::Venue::Testnet),
+            (OTHER_CRED, crate::venue::Venue::Testnet),
+        ],
+        serial,
+    );
+    // Drop both route guards while this fixture still owns the serial lock.
+    env._vars.push(inherited_env);
+    let (store, path) = sqlite_store().await;
+    // The vector's grace-period control uses this same full reconcile seam.
+    // Its client and queue use real time; only the truth observation is injected.
+    // Keep the production 15s background queue bound, not the longer RPC budget.
+    let truth =
+        crate::reconcile::reconcile_full_at_for_tests(CRED, store.clone(), crate::svc::now_ms())
+            .await
+            .expect("fresh fake venue must not wait on an inherited IP bucket");
+    assert!(
+        truth.all_positions_zero && truth.all_open_orders_empty && truth.all_open_algo_orders_empty
+    );
+    let fixture_scope = crate::binance_futures::egress_scope_for_transport(
+        Some(crate::venue::Venue::Testnet),
+        crate::venue::Venue::Testnet.rest_base_url(),
+    )
+    .unwrap();
+    assert_ne!(fixture_scope, inherited_scope);
+    assert_eq!(
+        prior_limiter.stored_tokens(&inherited_scope).await,
+        Some(0.0)
+    );
+    assert!(venue
+        .requests()
+        .iter()
+        .any(|r| r.is("GET", "/fapi/v1/openOrders")));
+    crate::rate_limiter::clear_shared_egress_bucket(&inherited_scope).await;
+    store.pool().close().await;
+    drop(env);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
 /// 跨层冻结向量的唯一生产者：每一条都是真实 gRPC 对 TLS 回环交易所跑出来
 /// 的原生回执（Python / 控制面 / 页面只消费它，不各写一份同形 DTO）。
 /// `WO_M1_EXCHANGE_VECTOR_PATH` 设置时写出，否则只校验流程。
@@ -3193,4 +3269,339 @@ async fn exchange_close_whose_normalized_quantity_is_not_the_full_position_is_re
     assert_eq!((state.as_str(), qty.as_str()), ("protected", "1.00005"));
     assert!(revision as u64 > request.expected_revision);
     h.cleanup().await;
+}
+
+// Round 2A fault boundaries use an external TLS peer to observe the real
+// signed POST and hold its response. The subprocess dies only after arrival;
+// no synthetic status write is used to manufacture an UNKNOWN outcome.
+async fn round2_kill_after_post(
+    venue: &TlsFakeVenue,
+    child: &mut std::process::Child,
+) -> crate::k04_fake_venue::RecordedRequest {
+    let started = std::time::Instant::now();
+    let post = loop {
+        if let Some(post) = venue
+            .requests()
+            .into_iter()
+            .find(|r| r.is("POST", "/fapi/v1/order"))
+        {
+            break post;
+        }
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "fault child exited before the exchange saw its POST"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "exchange POST boundary not reached"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "the ACK must still be withheld when SIGKILL is sent"
+    );
+    child.kill().unwrap();
+    let status = child.wait().unwrap();
+    assert_eq!(
+        std::os::unix::process::ExitStatusExt::signal(&status),
+        Some(9)
+    );
+    post
+}
+
+fn round2_submit_child(
+    path: &std::path::Path,
+    exchange: &std::path::Path,
+    mode: &str,
+) -> std::process::Child {
+    std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "position_close_exchange_tests::round2_mid_submit_child",
+            "--ignored",
+            "--nocapture",
+        ])
+        .env("ROUND2_FAULT_DATABASE", path)
+        .env("ROUND2_FAULT_PAYLOAD", exchange)
+        .env("ROUND2_FAULT_MODE", mode)
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn round2_f1_sigkill_after_entry_post_recovers_without_duplicate_and_restores_both_legs() {
+    use prost::Message;
+    let venue = TlsFakeVenue::start();
+    let env = exchange_env(&venue, Some(5_000));
+    venue.with_book(|book| {
+        book.positions = vec![venue_position("BTCUSDT", "0")];
+        book.allow_algo_submissions = true;
+        book.order_behaviors
+            .push_back(OrderBehavior::FillButHoldResponse { hold_ms: 10_000 });
+    });
+    let (store, path) = sqlite_store().await;
+    let now = crate::svc::now_ms();
+    sqlx::query("INSERT INTO risk_budget(credential_id,as_of_ms,equity_usdt,available_usdt,today_realized_pnl_usdt,today_realized_pnl_pct,drawdown_pct,total_exposure_pct,open_positions_count,group_exposure_json,kill_switch_level,remaining_credential_notional_usdt) VALUES(?,?,'10000','10000','0',0,0,0,0,'{}','none','5000')")
+        .bind(CRED).bind(now).execute(store.pool()).await.unwrap();
+    let req = p::ExecuteIntentsRequest {
+        credential_id: CRED.into(),
+        run_mode: "demo".into(),
+        schema_version: 1,
+        data_snapshot: Some(p::DataSnapshotDecision {
+            snapshot_id: format!("snap_{}", "a".repeat(32)),
+            quality_gate: "pass".into(),
+            allow_open: true,
+            allow_close: true,
+            created_at_ms: now,
+            schema_version: 1,
+        }),
+        intents: vec![p::OrderIntent {
+            bot_uid: "bot_round2_f1".into(),
+            run_id: "round2_f1".into(),
+            cycle_id: "round2_f1".into(),
+            idempotency_key: "round2_f1".into(),
+            client_order_id_short: "round2f1entry".into(),
+            exchange: "binance".into(),
+            market_kind: "futures".into(),
+            symbol_key: BTC.into(),
+            action: "open_long".into(),
+            order_type: "market".into(),
+            limit_price: String::new(),
+            reduce_only: false,
+            intent_id: "int_round2_f1".into(),
+            max_slippage_bps: 15,
+            protection: Some(p::Protection {
+                required: true,
+                stop_loss_price: "99".into(),
+                take_profit_price: "102.5".into(),
+                confirm_timeout_ms: 5000,
+                schema_version: 1,
+            }),
+            policy_version: risk_policy::TESTNET_POLICY_VERSION.into(),
+            valid_until_ms: now + 60_000,
+            config_hash: "c".repeat(64),
+            prompt_hash: format!("sha256:{}", "b".repeat(64)),
+            code_commit: "a".repeat(40),
+            schema_version: 1,
+        }],
+    };
+    let payload = path.with_extension("entry-request.bin");
+    std::fs::write(&payload, req.encode_to_vec()).unwrap();
+    store.pool().close().await;
+    let mut child = round2_submit_child(&path, &payload, "entry");
+    let post = round2_kill_after_post(&venue, &mut child).await;
+    let quantity = post.param("quantity").unwrap().to_string();
+    let client_id = post.param("newClientOrderId").unwrap().to_string();
+    assert_eq!(post.param("reduceOnly"), Some("false"));
+    // This is the simulated venue's actual fill, not a local engine write.
+    venue.with_book(|book| book.positions = vec![venue_position("BTCUSDT", &quantity)]);
+    let store = Store::connect(&format!("sqlite://{}", path.display()))
+        .await
+        .unwrap();
+    let entry = sqlx::query("SELECT status, COALESCE(exchange_order_id,'') exchange_id FROM engine_orders WHERE order_role='entry'").fetch_one(store.pool()).await.unwrap();
+    assert!(matches!(
+        entry.get::<String, _>("status").as_str(),
+        "pending_submit" | "submitted" | "unknown"
+    ));
+    assert_eq!(
+        entry.get::<String, _>("exchange_id"),
+        "",
+        "no ACK identity was persisted before the process died"
+    );
+    let engine = Engine::start(store).await;
+    engine.reconcile_now(CRED).await;
+    // Recovery calls the existing plan recovery path, and each leg requires
+    // the TLS peer's independent Algo truth before it can become confirmed.
+    for _ in 0..3 {
+        let count =
+            sqlx::query("SELECT COUNT(*) n FROM protection_orders WHERE verified_from_exchange=1")
+                .fetch_one(engine.store.pool())
+                .await
+                .unwrap()
+                .get::<i64, _>("n");
+        if count == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        engine.reconcile_now(CRED).await;
+    }
+    let confirmed =
+        sqlx::query("SELECT COUNT(*) n FROM protection_orders WHERE verified_from_exchange=1")
+            .fetch_one(engine.store.pool())
+            .await
+            .unwrap()
+            .get::<i64, _>("n");
+    assert_eq!(
+        confirmed, 2,
+        "a filled entry recovered without its response must have both protection legs confirmed"
+    );
+    let plans = sqlx::query("SELECT stop_loss_price FROM position_protection_plans")
+        .fetch_one(engine.store.pool())
+        .await
+        .unwrap();
+    assert_eq!(plans.get::<String, _>("stop_loss_price"), "99");
+    let result: Result<p::ExecuteIntentsResponse, _> = engine
+        .rpc("/execution_engine.v2.EngineExecution/ExecuteIntents", req)
+        .await;
+    let _ = result; // A duplicate may return its original ACK or an idempotency rejection.
+    let posts = venue
+        .requests()
+        .into_iter()
+        .filter(|r| r.is("POST", "/fapi/v1/order"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        posts.len(),
+        1,
+        "restart and duplicate input must not resend the opening order"
+    );
+    assert!(
+        venue
+            .requests()
+            .iter()
+            .any(|r| r.is("GET", "/fapi/v1/order")
+                && r.param("origClientOrderId") == Some(client_id.as_str())),
+        "recovery must resolve the original request identity"
+    );
+    let store = engine.stop().await;
+    store.pool().close().await;
+    drop(env);
+    std::fs::remove_file(payload).unwrap();
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn round2_f2_sigkill_after_close_post_recovers_original_fill_and_cleans_protection() {
+    let h = Harness::sqlite(
+        vec![OrderBehavior::FillButHoldResponse { hold_ms: 10_000 }],
+        Some(5_000),
+    )
+    .await;
+    let Harness {
+        venue,
+        _env,
+        engine,
+        database,
+    } = h;
+    let store = engine.stop().await;
+    store.pool().close().await;
+    let Database::Sqlite(path) = database else {
+        unreachable!()
+    };
+    let payload = path.with_extension("close-request.json");
+    let mut child = round2_submit_child(&path, &payload, "close");
+    let post = round2_kill_after_post(&venue, &mut child).await;
+    assert_eq!(post.param("reduceOnly"), Some("true"));
+    let input: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&payload).unwrap()).unwrap();
+    let request = p::ClosePositionRequest {
+        credential_id: CRED.into(),
+        position_id: POS.into(),
+        expected_revision: input["revision"].as_str().unwrap().parse().unwrap(),
+        expected_boot_id: input["boot"].as_str().unwrap().into(),
+        request_ref: input["ref"].as_str().unwrap().into(),
+        actor_member_id: 41,
+        schema_version: 1,
+    };
+    let store = Store::connect(&format!("sqlite://{}", path.display()))
+        .await
+        .unwrap();
+    assert_ne!(store.boot_id(), request.expected_boot_id);
+    let engine = Engine::start(store).await;
+    engine.reconcile_now(CRED).await;
+    let receipt = engine.receipt(&request).await;
+    let order = receipt.engine_order_id.as_deref().unwrap();
+    let (_, exchange_id, client_id) = close_order(&engine.store, order).await;
+    assert_eq!(client_id, post.param("newClientOrderId").unwrap());
+    // Deliver the recorded venue fill through the production user-stream sink
+    // after reconnect. REST truth alone cannot invent a per-trade fill row.
+    apply_trade_frame(
+        &engine.store,
+        exchange_id.parse().unwrap(),
+        &client_id,
+        "FILLED",
+        "1",
+        "1",
+        88_001,
+    )
+    .await;
+    crate::protection_cleanup::drive_due_obligations(&engine.store)
+        .await
+        .unwrap();
+    engine.reconcile_now(CRED).await;
+    let done = engine.receipt(&request).await;
+    assert_receipt(
+        &done,
+        "filled",
+        "EXCHANGE_FILLED",
+        "after real mid-submit SIGKILL",
+    );
+    assert_eq!(
+        protection(&done),
+        ("cleaned".into(), "PROTECTION_CLEANUP_CONFIRMED".into())
+    );
+    let h = Harness {
+        venue,
+        _env,
+        engine,
+        database: Database::Sqlite(path),
+    };
+    assert_eq!(
+        h.order_posts().len(),
+        1,
+        "restart never resubmits the close"
+    );
+    assert_eq!(h.algo_status(SL_ALGO), "CANCELED");
+    assert_eq!(h.algo_status(TP_ALGO), "CANCELED");
+    std::fs::remove_file(payload).unwrap();
+    h.cleanup().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "subprocess helper invoked by both round2 F1/F2 SIGKILL parent tests"]
+async fn round2_mid_submit_child() {
+    use prost::Message;
+    sqlx::any::install_default_drivers();
+    let path = std::env::var("ROUND2_FAULT_DATABASE").unwrap();
+    let payload = std::env::var("ROUND2_FAULT_PAYLOAD").unwrap();
+    let mode = std::env::var("ROUND2_FAULT_MODE").unwrap();
+    let store = Store::connect(&format!("sqlite://{path}")).await.unwrap();
+    let now = crate::svc::now_ms();
+    let cycle = crate::fill_replay::begin_recovery_cycle(
+        &store,
+        CRED,
+        crate::fill_replay::RecoveryTrigger::Startup,
+        now - 2,
+    )
+    .await
+    .unwrap();
+    crate::fill_replay::finalize_recovery_readiness(
+        &store,
+        CRED,
+        crate::fill_replay::RecoveryPhaseResult::Succeeded,
+        crate::fill_replay::RecoveryPhaseResult::Succeeded,
+        crate::fill_replay::RecoveryPhaseResult::Succeeded,
+        cycle,
+        now - 1,
+    )
+    .await
+    .unwrap();
+    let engine = Engine::start(store).await;
+    if mode == "entry" {
+        let req =
+            p::ExecuteIntentsRequest::decode(std::fs::read(payload).unwrap().as_slice()).unwrap();
+        let result: Result<p::ExecuteIntentsResponse, _> = engine
+            .rpc("/execution_engine.v2.EngineExecution/ExecuteIntents", req)
+            .await;
+        panic!("entry peer should withhold its ACK until the parent SIGKILL: {result:?}");
+    } else {
+        let req = engine.close_request(CRED, POS).await;
+        std::fs::write(payload,serde_json::to_vec(&serde_json::json!({"revision":req.expected_revision.to_string(),"boot":req.expected_boot_id,"ref":req.request_ref})).unwrap()).unwrap();
+        let result = engine.close(&req).await;
+        panic!("close peer should withhold its ACK until the parent SIGKILL: {result:?}");
+    }
 }

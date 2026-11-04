@@ -1379,6 +1379,29 @@ impl EngineExecutionV2Service {
 
 #[tonic::async_trait]
 impl EngineExecution for EngineExecutionV2Service {
+    async fn get_funding_history(
+        &self,
+        request: Request<proto_v2::GetFundingHistoryRequest>,
+    ) -> Result<Response<proto_v2::GetFundingHistoryResponse>, Status> {
+        crate::funding::get_history(&self.store, request.into_inner())
+            .await
+            .map(Response::new)
+    }
+    async fn get_runtime_diagnostics(
+        &self,
+        request: Request<proto_v2::GetRuntimeDiagnosticsRequest>,
+    ) -> Result<Response<proto_v2::GetRuntimeDiagnosticsResponse>, Status> {
+        crate::round2_diagnostics::read(&self.store, request.into_inner())
+            .await
+            .map(Response::new)
+    }
+    async fn inject_user_stream_fault(
+        &self,
+        request: Request<proto_v2::InjectUserStreamFaultRequest>,
+    ) -> Result<Response<proto_v2::InjectUserStreamFaultResponse>, Status> {
+        crate::round2_diagnostics::inject(request.into_inner()).map(Response::new)
+    }
+
     async fn get_position_close_target(
         &self,
         request: Request<proto_v2::GetPositionCloseTargetRequest>,

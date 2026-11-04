@@ -488,6 +488,25 @@ async fn run_connection_loop(
             )
             .await;
         } else {
+            if let Err(error) = crate::round2_diagnostics::record_connection_attempt(
+                &store,
+                &credential_id,
+                "TRADE_WS_API",
+                attempts > 0,
+                clock.now_ms(),
+            )
+            .await
+            {
+                health.lock().await.last_failure = Some(error.to_string());
+                short_cycles = wait_before_reconnect(
+                    clock.as_ref(),
+                    short_cycles,
+                    0,
+                    crate::reconcile::periodic_reconcile_interval_ms(),
+                )
+                .await;
+                continue;
+            }
             attempts = attempts.saturating_add(1);
             let connector = match crate::venue::ws_transport_for_credential(&credential_id)
                 .map_err(anyhow::Error::msg)
@@ -2107,6 +2126,26 @@ mod tests {
                 .await
                 .expect("the reconnected session must still serve its owner");
             assert_eq!(balances[0]["asset"], "USDT");
+            let diagnostics = crate::round2_diagnostics::read(
+                &fixture.store,
+                crate::proto_v2::GetRuntimeDiagnosticsRequest {
+                    credential_id: "paper".into(),
+                    schema_version: 1,
+                },
+            )
+            .await
+            .unwrap();
+            let metric = diagnostics
+                .websocket_scopes
+                .iter()
+                .find(|m| m.scope == "TRADE_WS_API")
+                .unwrap();
+            assert_eq!(metric.status, "OBSERVED");
+            assert_eq!(
+                metric.reconnect_count,
+                Some(1),
+                "the real connection loop must persist its reconnect"
+            );
             assert!(
                 !fixture.worker.is_finished(),
                 "the ws worker must keep running while a request owner still exists"
