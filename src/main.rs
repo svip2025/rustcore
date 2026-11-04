@@ -43,7 +43,6 @@ mod fault_injection;
 #[allow(dead_code)]
 mod fill_replay;
 mod funding;
-mod round2_diagnostics;
 #[cfg(test)]
 mod k04_fake_venue;
 mod kill_switch;
@@ -69,6 +68,7 @@ mod reconcile;
 mod reconcile_trace;
 mod reservation_release;
 mod risk;
+mod round2_diagnostics;
 mod simulation_quote;
 mod store;
 mod svc;

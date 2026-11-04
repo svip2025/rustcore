@@ -4063,7 +4063,10 @@ impl BinanceFuturesClient {
     }
 
     pub(crate) async fn funding_income_window(
-        &self, symbol: &str, start_time_ms: i64, end_time_ms: i64,
+        &self,
+        symbol: &str,
+        start_time_ms: i64,
+        end_time_ms: i64,
     ) -> anyhow::Result<serde_json::Value> {
         self.signed_get_json(
             "/fapi/v1/income",
@@ -4075,8 +4078,10 @@ impl BinanceFuturesClient {
                 ("limit", "1000".to_string()),
                 ("recvWindow", self.recv_window_ms.to_string()),
                 ("timestamp", self.clock.now_ms().max(0).to_string()),
-            ], RequestClass::EventTruth,
-        ).await
+            ],
+            RequestClass::EventTruth,
+        )
+        .await
     }
 
     async fn signed_get_json(
