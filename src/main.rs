@@ -42,6 +42,8 @@ mod exchange_filters;
 mod fault_injection;
 #[allow(dead_code)]
 mod fill_replay;
+mod funding;
+mod round2_diagnostics;
 #[cfg(test)]
 mod k04_fake_venue;
 mod kill_switch;

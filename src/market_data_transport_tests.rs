@@ -129,6 +129,27 @@ mod transport_tests {
             .into_iter()
             .map(|row| row.get::<String, _>("credential_id"))
             .collect::<Vec<_>>();
+        for credential in [PAPER_TRANSPORT_CRED, EXCHANGE_TRANSPORT_CRED] {
+            let diagnostics = crate::round2_diagnostics::read(
+                &store,
+                crate::proto_v2::GetRuntimeDiagnosticsRequest {
+                    credential_id: credential.into(),
+                    schema_version: 1,
+                },
+            )
+            .await
+            .unwrap();
+            let metric = diagnostics
+                .websocket_scopes
+                .iter()
+                .find(|m| m.scope == "MARKET_DATA")
+                .unwrap();
+            assert_eq!(
+                metric.status, "OBSERVED",
+                "production market loop must persist its connection attempt"
+            );
+            assert!(metric.reconnect_count.is_some());
+        }
         cleanup(store, path).await;
         assert_eq!(
             observed.unwrap_or_else(|error| panic!("both credentials must receive durable heartbeats: {error}; observed bar credentials: {bar_credentials:?}")),

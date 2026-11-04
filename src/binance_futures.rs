@@ -707,6 +707,7 @@ fn signed_request_weight(method: &str, path: &str, params: &[(String, String)]) 
         path if method == "POST" && ORDER_ENDPOINTS.contains(&path) => 0.0,
         "/fapi/v1/openOrders" | "/fapi/v1/openAlgoOrders" if !has_symbol => 40.0,
         "/fapi/v1/userTrades" => 5.0,
+        "/fapi/v1/income" => 30.0,
         // Binance 的 2024-08-07 changelog（2024-09-03 生效）把这两条从 5 提到 10，
         // 而 endpoint 页至今仍渲染 5。冲突未解，且只有读一次真实
         // `X-MBX-USED-WEIGHT-1M` 差值才能定论。**按高的那个记**：低估的后果是
@@ -4059,6 +4060,23 @@ impl BinanceFuturesClient {
                 }
             }
         }
+    }
+
+    pub(crate) async fn funding_income_window(
+        &self, symbol: &str, start_time_ms: i64, end_time_ms: i64,
+    ) -> anyhow::Result<serde_json::Value> {
+        self.signed_get_json(
+            "/fapi/v1/income",
+            vec![
+                ("symbol", symbol.to_string()),
+                ("incomeType", "FUNDING_FEE".to_string()),
+                ("startTime", start_time_ms.to_string()),
+                ("endTime", end_time_ms.to_string()),
+                ("limit", "1000".to_string()),
+                ("recvWindow", self.recv_window_ms.to_string()),
+                ("timestamp", self.clock.now_ms().max(0).to_string()),
+            ], RequestClass::EventTruth,
+        ).await
     }
 
     async fn signed_get_json(

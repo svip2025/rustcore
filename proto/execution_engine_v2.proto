@@ -28,6 +28,13 @@ service EngineExecution {
   rpc EnsureMarketData(EnsureMarketDataRequest) returns (EnsureMarketDataResponse);
   rpc GetPositionStates(GetPositionStatesRequest) returns (GetPositionStatesResponse);
   rpc GetAccountState(GetAccountStateRequest) returns (GetAccountStateResponse);
+  // Testnet-only read of a complete bounded funding-income window. Persists
+  // immutable income identities; never credits the account balance again.
+  rpc GetFundingHistory(GetFundingHistoryRequest) returns (GetFundingHistoryResponse);
+  rpc GetRuntimeDiagnostics(GetRuntimeDiagnosticsRequest) returns (GetRuntimeDiagnosticsResponse);
+  // Explicit ROUND2_TESTNET_FAULTS=1, demo ceiling, live disabled and testnet
+  // credential are mandatory. No listenKey is accepted or returned.
+  rpc InjectUserStreamFault(InjectUserStreamFaultRequest) returns (InjectUserStreamFaultResponse);
   // Passive, bounded account projection. Never refreshes venue truth or repairs state.
   rpc GetAccountOrderState(GetAccountOrderStateRequest) returns (GetAccountOrderStateResponse);
   rpc GetOrderByClientOrderId(GetOrderByClientOrderIdRequest) returns (GetOrderByClientOrderIdResponse);
@@ -1081,4 +1088,60 @@ message LifecycleFenceResponse {
   // Always present. A new observation never rewrites the original arm/boot/time.
   LifecycleFenceObservation current_observation = 4;
   uint32 schema_version = 1000;
+}
+
+message GetFundingHistoryRequest {
+  string credential_id = 1;
+  string symbol = 2; // BTCUSDT in round 2A.
+  int64 start_time_ms = 3; // Inclusive.
+  int64 end_time_ms = 4; // Inclusive, at or before request time.
+  uint32 schema_version = 1000;
+}
+message FundingIncomeEntry {
+  string public_id = 1; // Opaque digest; internal exchange transaction ID stays private.
+  int64 transaction_time_ms = 2;
+  string symbol = 3;
+  string asset = 4;
+  string amount_usdt = 5; // Signed decimal string.
+}
+message GetFundingHistoryResponse {
+  bool complete = 1;
+  string reason = 2;
+  int64 source_as_of_ms = 3;
+  int64 start_time_ms = 4;
+  int64 end_time_ms = 5;
+  string total_funding_usdt = 6;
+  repeated FundingIncomeEntry entries = 7;
+  uint32 schema_version = 1000;
+}
+message GetRuntimeDiagnosticsRequest {
+  string credential_id = 1;
+  uint32 schema_version = 1000;
+}
+message GetRuntimeDiagnosticsResponse {
+  int64 observed_at_ms = 1;
+  uint64 user_stream_reconnect_count = 2; // Persisted across engine restarts.
+  uint64 user_stream_reconnects_last_minute = 3;
+  bool user_stream_ready = 4;
+  string user_stream_phase = 5;
+  repeated WebSocketReconnectMetric websocket_scopes = 6;
+  uint32 schema_version = 1000;
+}
+message InjectUserStreamFaultRequest {
+  string credential_id = 1;
+  string action = 2; // disconnect|listen_key_expired
+  uint32 schema_version = 1000;
+}
+message InjectUserStreamFaultResponse {
+  bool accepted = 1;
+  string reason = 2;
+  uint32 schema_version = 1000;
+}
+
+message WebSocketReconnectMetric {
+  string scope = 1; // USER_DATA_STREAM|TRADE_WS_API|MARKET_DATA
+  string status = 2; // OBSERVED|DISABLED|NOT_OBSERVED
+  optional uint64 reconnect_count = 3;
+  optional uint64 reconnects_last_minute = 4;
+  // Counts reconnect attempts/cycles; the initial connection is excluded.
 }

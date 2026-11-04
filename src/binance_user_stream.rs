@@ -431,6 +431,64 @@ impl Drop for UserStreamTasks {
 ///
 /// 泛型参数就是生产里的那两半（`ws.split()`），因此测试喂 `stream::iter`
 /// 与一个记账 sink，跑的是**同一段代码**。
+async fn run_controlled_user_stream_reader_loop<R, W>(
+    store: &Store,
+    credential_id: &str,
+    sink: &BinanceEventSink,
+    read: &mut R,
+    write: &mut W,
+    idle_deadline: Duration,
+    write_deadline: Duration,
+    mut control: tokio::sync::mpsc::Receiver<crate::round2_diagnostics::UserStreamFault>,
+) -> anyhow::Result<()>
+where
+    R: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    W: futures_util::Sink<Message> + Unpin,
+    W::Error: std::fmt::Display,
+{
+    let fault = tokio::select! {
+        result = run_user_stream_reader_loop(store, credential_id, sink, read, write, idle_deadline, write_deadline) => return result,
+        fault = control.recv() => fault,
+    };
+    match fault {
+        Some(crate::round2_diagnostics::UserStreamFault::ListenKeyExpired) => {
+            // Exercise the same parsed-envelope branch as a venue notification.
+            let frame =
+                serde_json::json!({"e":"listenKeyExpired","E":crate::svc::now_ms()}).to_string();
+            handle_ws_data_frame(store, credential_id, sink, WsDataFrameKind::Text, &frame).await
+        }
+        Some(crate::round2_diagnostics::UserStreamFault::Disconnect) => {
+            // Drop readiness before the close write, including write failure.
+            drop_readiness_before_returning(
+                store,
+                credential_id,
+                "injected_disconnect",
+                "Testnet operator disconnected the user data stream",
+            )
+            .await?;
+            let _ = crate::binance_futures::send_frame_within(
+                write_deadline,
+                write,
+                Message::Close(None),
+            )
+            .await;
+            Err(anyhow!(
+                "Testnet operator disconnected the user data stream"
+            ))
+        }
+        None => {
+            drop_readiness_before_returning(
+                store,
+                credential_id,
+                "stream_control_closed",
+                "User stream control ownership ended",
+            )
+            .await?;
+            Err(anyhow!("User stream control ownership ended"))
+        }
+    }
+}
+
 pub(crate) async fn run_user_stream_reader_loop<R, W>(
     store: &Store,
     credential_id: &str,
@@ -792,6 +850,19 @@ async fn handle_ws_data_frame(
             return Err(anyhow!(reason));
         }
     };
+    // F-15: a well-formed expiry is valid JSON but invalidates this session.
+    // Advance the recovery generation before return, just like a transport
+    // close. Otherwise the sink's unknown-event branch silently keeps ready=1.
+    if parsed.event_type == "listenKeyExpired" {
+        drop_readiness_before_returning(
+            store,
+            credential_id,
+            "listen_key_expired",
+            "Venue user data stream session expired",
+        )
+        .await?;
+        return Err(anyhow!("Venue user data stream session expired"));
+    }
     if let Err(error) = sink.handle_ws_envelope(credential_id, &parsed).await {
         // **本地已经与交易所真值脱节**：这一帧一个字节都没落库。
         // 继续读下一帧等于把 stream 当健康的用，而新开仓正是靠
@@ -959,6 +1030,14 @@ async fn run_once(
     limiter: CredentialRateLimiter,
     trigger: RecoveryTrigger,
 ) -> anyhow::Result<()> {
+    crate::round2_diagnostics::record_connection_attempt(
+        &store,
+        credential_id,
+        "USER_DATA_STREAM",
+        matches!(trigger, RecoveryTrigger::Reconnect),
+        crate::svc::now_ms(),
+    )
+    .await?;
     let workflow = fill_replay::recovery_workflow(trigger);
     if workflow
         != [
@@ -1065,6 +1144,8 @@ async fn run_once(
     };
     let (mut write, mut read) = ws.split();
 
+    let control = crate::round2_diagnostics::register_stream(credential_id)?;
+
     // Keepalive every 30 minutes (Binance recommends <= 30m).
     let keepalive = tokio::spawn({
         let client = client.clone();
@@ -1085,7 +1166,7 @@ async fn run_once(
     let ws_sink = sink.clone();
     let task_store = store.clone();
     let reader = tokio::spawn(async move {
-        run_user_stream_reader_loop(
+        run_controlled_user_stream_reader_loop(
             &task_store,
             &task_credential_id,
             &ws_sink,
@@ -1093,6 +1174,7 @@ async fn run_once(
             &mut write,
             idle_deadline,
             connect_deadline,
+            control,
         )
         .await
     });
@@ -2235,6 +2317,10 @@ mod tests {
                 .await
                 .expect("fresh convergence must reach the existing finalize path");
                 assert_eq!(ready.ready, 1);
+                let diagnostics = crate::round2_diagnostics::read(&store, crate::proto_v2::GetRuntimeDiagnosticsRequest { credential_id:credential_id.clone(), schema_version:1 }).await.unwrap();
+                let metric = diagnostics.websocket_scopes.iter().find(|m|m.scope=="USER_DATA_STREAM").unwrap();
+                assert_eq!(metric.status,"OBSERVED");
+                assert_eq!(metric.reconnect_count,Some(1),"the real user-stream recovery cycle must persist its reconnect");
                 assert_eq!(ready.phase, "ready");
                 assert_eq!(
                     crate::fill_replay::load_fill_stream_state(&store, &credential_id)
@@ -3708,6 +3794,89 @@ mod tests {
             "acked",
             "the stream must stop at the unparsable binary frame"
         );
+        store.pool().close().await;
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn round2_controlled_disconnect_and_expiry_reach_real_reader_and_persist_not_ready() {
+        let _serial = crate::binance_futures::tests::env_serial_guard();
+        let _env = [
+            crate::binance_futures::tests::TestEnvVar::set("ROUND2_TESTNET_FAULTS".into(), "1"),
+            crate::binance_futures::tests::TestEnvVar::set("ENGINE_LIVE_ENABLED".into(), "false"),
+            crate::binance_futures::tests::TestEnvVar::set("ENGINE_STAGE_MAX".into(), "demo"),
+            crate::binance_futures::tests::TestEnvVar::set(
+                crate::venue::venue_env_name(READER_CREDENTIAL),
+                "testnet",
+            ),
+        ];
+        for action in [
+            crate::round2_diagnostics::UserStreamFault::Disconnect,
+            crate::round2_diagnostics::UserStreamFault::ListenKeyExpired,
+        ] {
+            let (store, path) = ready_reader_fixture("round2-control").await;
+            let receiver = crate::round2_diagnostics::register_stream(READER_CREDENTIAL).unwrap();
+            let action_name = match action {
+                crate::round2_diagnostics::UserStreamFault::Disconnect => "disconnect",
+                crate::round2_diagnostics::UserStreamFault::ListenKeyExpired => {
+                    "listen_key_expired"
+                }
+            };
+            let accepted = crate::proto_v2::engine_execution_server::EngineExecution::inject_user_stream_fault(
+                &crate::svc_v2::EngineExecutionV2Service::new(store.clone()),
+                tonic::Request::new(crate::proto_v2::InjectUserStreamFaultRequest { credential_id:READER_CREDENTIAL.into(), action:action_name.into(),schema_version:1 }),
+            ).await.unwrap().into_inner();
+            assert!(accepted.accepted);
+            let mut read = futures_util::stream::pending::<
+                Result<Message, tokio_tungstenite::tungstenite::Error>,
+            >();
+            let mut write: Vec<Message> = Vec::new();
+            let outcome = run_controlled_user_stream_reader_loop(
+                &store,
+                READER_CREDENTIAL,
+                &BinanceEventSink::new(store.clone()),
+                &mut read,
+                &mut write,
+                Duration::from_secs(5),
+                Duration::from_secs(5),
+                receiver,
+            )
+            .await;
+            assert!(outcome.is_err());
+            let state = reader_stream_state(&store).await;
+            assert!(!state.ready);
+            match action {
+                crate::round2_diagnostics::UserStreamFault::Disconnect => {
+                    assert_eq!(state.phase, "injected_disconnect");
+                    assert!(matches!(write.as_slice(), [Message::Close(None)]));
+                }
+                crate::round2_diagnostics::UserStreamFault::ListenKeyExpired => {
+                    assert_eq!(state.phase, "listen_key_expired")
+                }
+            }
+            store.pool().close().await;
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[tokio::test]
+    async fn round2_valid_listen_key_expired_stops_reader_before_next_frame() {
+        let (store, path) = ready_reader_fixture("round2-expired").await;
+        let result = handle_ws_data_frame(
+            &store,
+            READER_CREDENTIAL,
+            &BinanceEventSink::new(store.clone()),
+            WsDataFrameKind::Text,
+            r#"{"e":"listenKeyExpired","E":1780000000000}"#,
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "a valid expiry must terminate the stream cycle"
+        );
+        let state = reader_stream_state(&store).await;
+        assert!(!state.ready, "expired stream must never remain entry-ready");
+        assert_eq!(state.phase, "listen_key_expired");
         store.pool().close().await;
         let _ = std::fs::remove_file(path);
     }
